@@ -70,15 +70,22 @@ void Enemy_GetVerifierState(EnemyVerifierState *out) {
     memset(out, 0, sizeof(*out));
     for (i = 0; i < ENEMY_SLOT_COUNT; ++i) {
         const EnemySlot *e = &enemies[i];
-        out->flag[i] = e->flag; out->id[i] = e->id;
-        out->state[i] = e->state; out->moving_dir[i] = e->moving_dir;
-        out->page[i] = e->page; out->x[i] = e->x;
-        out->y_high[i] = e->y_high; out->y[i] = e->y;
-        out->x_speed[i] = e->x_speed; out->y_speed[i] = e->y_speed;
-        out->x_mf[i] = e->x_mf; out->y_mf[i] = e->y_mf;
+        out->flag[i] = e->flag;
+        out->id[i] = e->id;
+        out->state[i] = e->state;
+        out->moving_dir[i] = e->moving_dir;
+        out->page[i] = e->page;
+        out->x[i] = e->x;
+        out->y_high[i] = e->y_high;
+        out->y[i] = e->y;
+        out->x_speed[i] = e->x_speed;
+        out->y_speed[i] = e->y_speed;
+        out->x_mf[i] = e->x_mf;
+        out->y_mf[i] = e->y_mf;
         out->y_dummy[i] = e->y_dummy;
         out->collision_bits[i] = e->collision_bits;
-        out->bbox_ctrl[i] = e->bbox_ctrl; out->spr_attrib[i] = e->spr_attrib;
+        out->bbox_ctrl[i] = e->bbox_ctrl;
+        out->spr_attrib[i] = e->spr_attrib;
         out->offscreen_masked[i] = e->offscreen_masked;
         out->firebar_spin_speed[i] = e->firebar_spin_speed;
         out->firebar_spin_direction[i] = e->firebar_spin_direction;
@@ -87,15 +94,21 @@ void Enemy_GetVerifierState(EnemyVerifierState *out) {
         out->hammer_jump_timer[i] = e->hammer_jump_timer;
         out->floaty_control[i] = e->floaty_control;
         out->floaty_timer[i] = e->floaty_timer;
-        out->floaty_x[i] = e->floaty_x; out->floaty_y[i] = e->floaty_y;
-        out->bbox[i][0] = e->bbox_ul_x; out->bbox[i][1] = e->bbox_ul_y;
-        out->bbox[i][2] = e->bbox_lr_x; out->bbox[i][3] = e->bbox_lr_y;
+        out->floaty_x[i] = e->floaty_x;
+        out->floaty_y[i] = e->floaty_y;
+        out->bbox[i][0] = e->bbox_ul_x;
+        out->bbox[i][1] = e->bbox_ul_y;
+        out->bbox[i][2] = e->bbox_lr_x;
+        out->bbox[i][3] = e->bbox_lr_y;
     }
     for (i = 0; i < FIREBALL_SLOT_COUNT; ++i) {
         const FireballSlot *f = &fireballs[i];
-        out->fireball_state[i] = f->state; out->fireball_page[i] = f->page;
-        out->fireball_x[i] = f->x; out->fireball_y_high[i] = f->y_high;
-        out->fireball_y[i] = f->y; out->fireball_x_speed[i] = f->x_speed;
+        out->fireball_state[i] = f->state;
+        out->fireball_page[i] = f->page;
+        out->fireball_x[i] = f->x;
+        out->fireball_y_high[i] = f->y_high;
+        out->fireball_y[i] = f->y;
+        out->fireball_x_speed[i] = f->x_speed;
         out->fireball_y_speed[i] = f->y_speed;
         out->fireball_bbox_ctrl[i] = f->bbox_ctrl;
         out->fireball_bouncing[i] = f->bouncing;
@@ -105,11 +118,16 @@ void Enemy_GetVerifierState(EnemyVerifierState *out) {
     out->power_up_type = s_PowerUpType;
     out->lakitu_reappear_timer = s_LakituReappearTimer;
     out->stomp_chain_counter = s_StompChainCounter;
-    out->bowser[0] = s_Bowser.body_controls; out->bowser[1] = s_Bowser.feet_counter;
-    out->bowser[2] = s_Bowser.movement_speed; out->bowser[3] = s_Bowser.orig_x;
-    out->bowser[4] = s_Bowser.flame_timer_ctrl; out->bowser[5] = s_Bowser.front_slot;
-    out->bowser[6] = s_Bowser.bridge_offset; out->bowser[7] = s_Bowser.gfx_flag;
-    out->bowser[8] = s_Bowser.hit_points; out->bowser[9] = s_Bowser.max_range;
+    out->bowser[0] = s_Bowser.body_controls;
+    out->bowser[1] = s_Bowser.feet_counter;
+    out->bowser[2] = s_Bowser.movement_speed;
+    out->bowser[3] = s_Bowser.orig_x;
+    out->bowser[4] = s_Bowser.flame_timer_ctrl;
+    out->bowser[5] = s_Bowser.front_slot;
+    out->bowser[6] = s_Bowser.bridge_offset;
+    out->bowser[7] = s_Bowser.gfx_flag;
+    out->bowser[8] = s_Bowser.hit_points;
+    out->bowser[9] = s_Bowser.max_range;
 }
 
 uint8_t enemy_slot_index(const EnemySlot* e) {

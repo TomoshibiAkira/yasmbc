@@ -1,57 +1,271 @@
-/* ASM-first SMB sound driver. The game-specific driver is kept separate from
- * the host 2A03 renderer so NES builds can write the same registers directly. */
+/*
+ * ASM-first SMB sound driver.
+ *
+ * The game-specific driver is kept separate from the host 2A03 renderer so
+ * NES builds can write the same registers directly.  This file intentionally
+ * retains the original RAM/state-machine boundaries, but uses descriptive C
+ * names at those boundaries rather than exposing 6502 temporary-register
+ * names to the rest of the port.
+ */
 #include <string.h>
 
 #include "audio.h"
 #include "assets.h"
 
-typedef char AudioVerifierState_must_be_38_bytes[
-    sizeof(AudioVerifierState) == 38 ? 1 : -1];
+typedef char AudioVerifierState_must_be_38_bytes[sizeof(AudioVerifierState) == 38 ? 1 : -1];
 #include "audio-data.h"
 #include "constants/defs.h"
 #include "constants/globals.h"
 #include "system/platform.h"
 
+/* CPU addresses of the 2A03 registers used by SMB.  The values are bus
+ * addresses, not host audio-library offsets. */
 enum {
-    SQ1 = 0x4000, SQ2 = 0x4004, TRI = 0x4008, NOISE = 0x400c,
-    DAC = 0x4010, STATUS = 0x4015, FRAME = 0x4017
+    APU_SQUARE1 = 0x4000,
+    APU_SQUARE2 = 0x4004,
+    APU_TRIANGLE = 0x4008,
+    APU_NOISE = 0x400c,
+    APU_DMC = 0x4010,
+    APU_STATUS = 0x4015,
+    APU_FRAME_COUNTER = 0x4017
+};
+
+enum {
+    APU_STATUS_DISABLE_SQUARE1 = 0x0e,
+    APU_STATUS_DISABLE_SQUARE2 = 0x0d,
+    APU_STATUS_DISABLE_TRIANGLE = 0x0b,
+    APU_STATUS_ENABLE_CHANNELS = 0x0f,
+    APU_FRAME_COUNTER_RELOAD = 0xff
+};
+
+/* Register offsets are named so writes such as base + 2 read as
+ * "timer low" instead of another unexplained literal. */
+enum {
+    APU_CONTROL_OFFSET = 0,
+    APU_SWEEP_OFFSET = 1,
+    APU_TIMER_LOW_OFFSET = 2,
+    APU_TIMER_HIGH_OFFSET = 3,
+    APU_DMC_OUTPUT_OFFSET = 1,
+    APU_TIMER_HIGH_LENGTH_FLAG = 0x08
+};
+
+/* Addresses inside the extracted audio/music PRG-ROM region.  These names
+ * correspond to labels in smb1-disasm/audio/music.asm and main.asm. */
+enum {
+    MUSIC_HEADER_OFFSET_TABLE = 0xf90c,
+    MUSIC_FREQUENCY_TABLE_HIGH = 0xff00,
+    MUSIC_FREQUENCY_TABLE_LOW = 0xff01,
+    MUSIC_LENGTH_TABLE = 0xff66,
+    MUSIC_END_CASTLE_ENVELOPE = 0xff96,
+    MUSIC_AREA_ENVELOPE = 0xff9a,
+    MUSIC_WATER_EVENT_ENVELOPE = 0xffa2,
+    MUSIC_BOWSER_FLAME_ENVELOPE = 0xffc9,
+    MUSIC_BRICK_SHATTER_ENVELOPE = 0xffea
+};
+
+/* Bit fields encoded in the music stream and the music-selection buffers. */
+enum {
+    MUSIC_LENGTH_FLAG = 0x80,
+    MUSIC_NOTE_MASK = 0x3e,
+    MUSIC_LENGTH_INDEX_MASK = 0x07,
+    MUSIC_AREA_CONTROL_MASK = 0x7d,
+    MUSIC_ENVELOPE_SKIP_MASK = 0x91,
+    MUSIC_AREA_LOOP_MASK = 0x5f,
+    MUSIC_TRIANGLE_EVENT_MASK = 0x6e,
+    MUSIC_TRIANGLE_AREA_MASK = 0x0a,
+    MUSIC_NOISE_AREA_MASK = 0xf3,
+    MUSIC_DAC_AREA_MASK = 0x03,
+    MUSIC_NOISE_LONG_BEAT = 0x30,
+    MUSIC_NOISE_STRONG_BEAT = 0x20,
+    MUSIC_NOISE_SHORT_BEAT = 0x10,
+    MUSIC_CONTROL_END_CASTLE = 0x04,
+    MUSIC_CONTROL_WATER_EVENT = 0x28,
+    MUSIC_CONTROL_STANDARD = 0x08
+};
+
+/* Frame/NMI counters copied from the sound routines. */
+enum {
+    SFX_JUMP_LENGTH = 0x28,
+    SFX_JUMP_SECOND_PHASE = 0x25,
+    SFX_JUMP_THIRD_PHASE = 0x20,
+    SFX_BUMP_LENGTH = 0x0a,
+    SFX_FIREBALL_LENGTH = 0x05,
+    SFX_SECOND_TONE_PHASE = 0x06,
+    SFX_STOMP_TIMER_PHASE = 0x06,
+    SFX_SMACK_SECOND_PHASE = 0x08,
+    SFX_SWIM_STOMP_LENGTH = 0x0e,
+    SFX_SMACK_LENGTH = 0x0e,
+    SFX_PIPE_INJURY_LENGTH = 0x2f,
+    SFX_FLAGPOLE_LENGTH = 0x40,
+    SFX_BOWSER_FALL_LENGTH = 0x38,
+    SFX_BOWSER_FALL_SECOND_PHASE = 0x08,
+    SFX_COIN_LENGTH = 0x35,
+    SFX_TIMER_LENGTH = 0x06,
+    SFX_COIN_TIMER_SECOND_PHASE = 0x30,
+    SFX_GROW_POWERUP_LENGTH = 0x10,
+    SFX_GROW_VINE_LENGTH = 0x20,
+    SFX_BLAST_LENGTH = 0x20,
+    SFX_BLAST_SECOND_PHASE = 0x18,
+    SFX_POWERUP_GRAB_LENGTH = 0x36,
+    SFX_EXTRA_LIFE_LENGTH = 0x30,
+    SFX_BRICK_SHATTER_LENGTH = 0x20,
+    SFX_BOWSER_FLAME_LENGTH = 0x40,
+    PAUSE_SOUND_LENGTH = 0x2a,
+    MUSIC_GROUND_HEADER_START = 0x10,
+    MUSIC_GROUND_HEADER_END = 0x32,
+    MUSIC_GROUND_HEADER_LOOP = 0x11,
+    MUSIC_AREA_HEADER_INDEX_START = 0x08,
+    MUSIC_LONG_TRIANGLE_NOTE = 0x12,
+    DAC_COUNTER_LIMIT = 0x30,
+    PAUSE_SECOND_TONE_LATE = 0x24,
+    PAUSE_FIRST_TONE_REPEAT = 0x1e,
+    PAUSE_SECOND_TONE_EARLY = 0x18,
+    PAUSE_FIRST_TONE_NOTE_INDEX = 0x44,
+    PAUSE_SECOND_TONE_NOTE_INDEX = 0x64
+};
+
+/* Values written to the APU registers.  These are 2A03 duty/envelope,
+ * sweep, timer, and length-control bytes—not host audio frequencies.  Giving
+ * each group a name keeps the ASM-derived values visible without making the
+ * call sites look like an encoded byte stream. */
+enum {
+    APU_SQUARE_SWEEP_DEFAULT = 0x7f,
+    APU_SQUARE_VOLUME_MUSIC = 0x82,
+    APU_SQUARE_VOLUME_SILENT = 0x90,
+    APU_SQUARE_VOLUME_MUSIC_REST = 0x04,
+    APU_SQUARE1_VOLUME_STREAM_END = 0x83,
+    APU_SQUARE1_SWEEP_STREAM_END = 0x94,
+    APU_TRIANGLE_CONTROL_SHORT = 0x1f,
+    APU_TRIANGLE_CONTROL_LONG = 0xff,
+    APU_TRIANGLE_CONTROL_CASTLE = 0x0f,
+    APU_NOISE_VOLUME_MUSIC = 0x1c,
+    APU_NOISE_VOLUME_GENERIC = 0x10,
+    APU_NOISE_BOWSER_PERIOD = 0x0f,
+    APU_NOISE_LENGTH_LONG = 0x58,
+    APU_NOISE_LENGTH_SHORT = 0x18,
+    APU_NOISE_VOLUME_SILENT = 0xf0,
+    APU_PAUSE_VOLUME = 0x84
+};
+
+enum {
+    SFX_JUMP_VOLUME = 0x82,
+    SFX_JUMP_SWEEP = 0xa7,
+    SFX_SMALL_JUMP_NOTE_INDEX = 0x26,
+    SFX_BIG_JUMP_NOTE_INDEX = 0x18,
+    SFX_JUMP_SECOND_SWEEP = 0xf6,
+    SFX_JUMP_SECOND_VOLUME = 0x5f,
+    SFX_JUMP_THIRD_SWEEP = 0xbc,
+    SFX_JUMP_THIRD_VOLUME = 0x48,
+    SFX_BUMP_VOLUME = 0x9e,
+    SFX_BUMP_SWEEP = 0x93,
+    SFX_FIREBALL_SWEEP = 0x99,
+    SFX_BUMP_NOTE_INDEX = 0x0c,
+    SFX_BUMP_SECOND_SWEEP = 0xbb,
+    SFX_STOMP_SWEEP = 0x9c,
+    SFX_STOMP_NOTE_INDEX = 0x26,
+    SFX_STOMP_TIMER_LOW = 0x9e,
+    SFX_SMACK_VOLUME = 0x9f,
+    SFX_SMACK_SWEEP = 0xcb,
+    SFX_SMACK_NOTE_INDEX = 0x28,
+    SFX_SMACK_TIMER_LOW = 0xa0,
+    SFX_SMACK_SECOND_VOLUME = 0x9f,
+    SFX_PIPE_VOLUME = 0x9a,
+    SFX_PIPE_SWEEP = 0x91,
+    SFX_PIPE_NOTE_INDEX = 0x44,
+    SFX_FLAGPOLE_NOTE_INDEX = 0x62,
+    SFX_FLAGPOLE_SWEEP = 0xbc,
+    SFX_FLAGPOLE_VOLUME = 0x99
+};
+
+enum {
+    SFX_BOWSER_FALL_VOLUME = 0x9f,
+    SFX_BOWSER_FALL_SWEEP = 0xc4,
+    SFX_BOWSER_FALL_NOTE_INDEX = 0x18,
+    SFX_BOWSER_FALL_SECOND_SWEEP = 0xa4,
+    SFX_BOWSER_FALL_SECOND_NOTE_INDEX = 0x5a,
+    SFX_COIN_VOLUME = 0x8d,
+    SFX_TIMER_VOLUME = 0x98,
+    SFX_COIN_TIMER_NOTE_INDEX = 0x42,
+    SFX_TIMER_SECOND_TIMER_LOW = 0x54,
+    SFX_GROW_VOLUME = 0x9d,
+    SFX_BLAST_VOLUME = 0x9f,
+    SFX_BLAST_SWEEP = 0x94,
+    SFX_BLAST_NOTE_INDEX = 0x5e,
+    SFX_BLAST_SECOND_SWEEP = 0x93,
+    SFX_BLAST_SECOND_NOTE_INDEX = 0x18,
+    SFX_POWERUP_GRAB_VOLUME = 0x5d,
+    SFX_EXTRA_LIFE_VOLUME = 0x82
+};
+
+enum {
+    MUSIC_NOISE_LONG_PERIOD = 3,
+    MUSIC_NOISE_STRONG_PERIOD = 0x0c,
+    MUSIC_NOISE_SHORT_PERIOD = 3,
+    MUSIC_SQUARE_INVALID_VOLUME = 0
 };
 
 typedef struct AudioState {
-    uint8_t sq1_buf, sq2_buf, noise_buf, area_buf, pause_buf;
-    uint8_t music_data_lo, music_data_hi;
-    uint8_t off_sq2, off_sq1, off_tri, off_noise;
-    uint8_t note_table, sq2_len_buf, sq2_len, sq2_env;
-    uint8_t sq1_len, sq1_env, tri_len_buf, tri_len, noise_len;
-    uint8_t sq1_sfx_len, sq2_sfx_len, secondary, noise_sfx_len;
-    uint8_t dac_counter, noise_loop, note_adder, area_alt;
-    uint8_t pause_mode, ground_header, alt_reg;
+    uint8_t square1_buffer;
+    uint8_t square2_buffer;
+    uint8_t noise_buffer;
+    uint8_t area_music_buffer;
+    uint8_t pause_buffer;
+
+    uint8_t music_data_low;
+    uint8_t music_data_high;
+    uint8_t music_offset_square2;
+    uint8_t music_offset_square1;
+    uint8_t music_offset_triangle;
+    uint8_t music_offset_noise;
+
+    uint8_t note_length_table_offset;
+    uint8_t square2_note_length_buffer;
+    uint8_t square2_note_length_counter;
+    uint8_t square2_envelope;
+    uint8_t square1_note_length_counter;
+    uint8_t square1_envelope;
+    uint8_t triangle_note_length_buffer;
+    uint8_t triangle_note_length_counter;
+    uint8_t noise_beat_length_counter;
+
+    uint8_t square1_sfx_length_counter;
+    uint8_t square2_sfx_length_counter;
+    uint8_t sfx_secondary_counter;
+    uint8_t noise_sfx_length_counter;
+
+    uint8_t dac_counter;
+    uint8_t noise_loopback_offset;
+    uint8_t note_length_table_adder;
+    uint8_t area_music_buffer_alt;
+    uint8_t pause_mode_flag;
+    uint8_t ground_music_header_offset;
+    uint8_t alternate_register_content_flag;
 } AudioState;
 
-static AudioState a;
+static AudioState audio_state;
 
 /* InitializeMemory (main.asm:1536-1555) is called with Y=$4b by
  * InitializeArea.  Its page loop clears the sound symbols at $00f0-$00ff,
  * but it does not reach SoundMemory at $07b0.  Keep the high sound bank
  * untouched here, just as the 6502 loop does. */
 void Audio_ResetLowMemory(void) {
-    a.note_table = 0;       /* NoteLenLookupTblOfs=$00f0 */
-    a.sq1_buf = 0;           /* Square1SoundBuffer=$00f1 */
-    a.sq2_buf = 0;           /* Square2SoundBuffer=$00f2 */
-    a.noise_buf = 0;         /* NoiseSoundBuffer=$00f3 */
-    a.area_buf = 0;          /* AreaMusicBuffer=$00f4 */
-    a.music_data_lo = 0;    /* MusicDataLow=$00f5 */
-    a.music_data_hi = 0;    /* MusicDataHigh=$00f6 */
-    a.off_sq2 = 0;           /* MusicOffset_Square2=$00f7 */
-    a.off_sq1 = 0;           /* MusicOffset_Square1=$00f8 */
-    a.off_tri = 0;           /* MusicOffset_Triangle=$00f9 */
+    audio_state.note_length_table_offset = 0; /* NoteLenLookupTblOfs=$00f0 */
+    audio_state.square1_buffer = 0;           /* Square1SoundBuffer=$00f1 */
+    audio_state.square2_buffer = 0;           /* Square2SoundBuffer=$00f2 */
+    audio_state.noise_buffer = 0;             /* NoiseSoundBuffer=$00f3 */
+    audio_state.area_music_buffer = 0;        /* AreaMusicBuffer=$00f4 */
+    audio_state.music_data_low = 0;           /* MusicDataLow=$00f5 */
+    audio_state.music_data_high = 0;          /* MusicDataHigh=$00f6 */
+    audio_state.music_offset_square2 = 0;     /* MusicOffset_Square2=$00f7 */
+    audio_state.music_offset_square1 = 0;     /* MusicOffset_Square1=$00f8 */
+    audio_state.music_offset_triangle = 0;    /* MusicOffset_Triangle=$00f9 */
 
     g_PauseSoundQueue = 0;   /* PauseSoundQueue=$00fa */
-    g_AreaMusicQueue = 0;   /* AreaMusicQueue=$00fb */
-    g_EventMusicQueue = 0;  /* EventMusicQueue=$00fc */
-    g_NoiseSoundQueue = 0;  /* NoiseSoundQueue=$00fd */
-    g_Square2SoundQueue = 0;/* Square2SoundQueue=$00fe */
-    g_Square1SoundQueue = 0;/* Square1SoundQueue=$00ff */
+    g_AreaMusicQueue = 0;    /* AreaMusicQueue=$00fb */
+    g_EventMusicQueue = 0;   /* EventMusicQueue=$00fc */
+    g_NoiseSoundQueue = 0;   /* NoiseSoundQueue=$00fd */
+    g_Square2SoundQueue = 0; /* Square2SoundQueue=$00fe */
+    g_Square1SoundQueue = 0; /* Square1SoundQueue=$00ff */
 }
 
 /* InitializeGame performs the same low-page clear and then ClrSndLoop
@@ -59,7 +273,7 @@ void Audio_ResetLowMemory(void) {
  * the C owner of those physical sound bytes; the queue globals are the
  * corresponding $00f0-$00ff aliases cleared by InitializeMemory. */
 void Audio_ResetGameMemory(void) {
-    memset(&a, 0, sizeof(a));
+    memset(&audio_state, 0, sizeof(audio_state));
     g_EventMusicBuffer = 0; /* EventMusicBuffer=$07b1, outside AudioState. */
     g_PauseSoundQueue = 0;
     g_AreaMusicQueue = 0;
@@ -69,423 +283,752 @@ void Audio_ResetGameMemory(void) {
     g_Square1SoundQueue = 0;
 }
 
-static uint8_t swim_env[14];
-static uint8_t extra_life_freq[6];
-static uint8_t powerup_freq[27];
-static uint8_t grow_freq[32];
-static uint8_t brick_freq[16];
+static uint8_t swim_stomp_envelope[14];
+static uint8_t extra_life_frequency[6];
+static uint8_t powerup_grab_frequency[27];
+static uint8_t powerup_vgrow_frequency[32];
+static uint8_t brick_shatter_frequency[16];
 
 int Audio_LoadRomTables(void) {
-    if (Assets_Copy("tables/swim_stomp_envelope.bin", swim_env, sizeof(swim_env)) ||
-        Assets_Copy("tables/extra_life_freq.bin", extra_life_freq,
-                    sizeof(extra_life_freq)) ||
-        Assets_Copy("tables/powerup_grab_freq.bin", powerup_freq,
-                    sizeof(powerup_freq)) ||
-        Assets_Copy("tables/powerup_vgrow_freq.bin", grow_freq, sizeof(grow_freq)) ||
-        Assets_Copy("tables/brick_shatter_freq.bin", brick_freq, sizeof(brick_freq)))
+    if (Assets_Copy("tables/swim_stomp_envelope.bin", swim_stomp_envelope,
+                    sizeof(swim_stomp_envelope)) ||
+        Assets_Copy("tables/extra_life_freq.bin", extra_life_frequency,
+                    sizeof(extra_life_frequency)) ||
+        Assets_Copy("tables/powerup_grab_freq.bin", powerup_grab_frequency,
+                    sizeof(powerup_grab_frequency)) ||
+        Assets_Copy("tables/powerup_vgrow_freq.bin", powerup_vgrow_frequency,
+                    sizeof(powerup_vgrow_frequency)) ||
+        Assets_Copy("tables/brick_shatter_freq.bin", brick_shatter_frequency,
+                    sizeof(brick_shatter_frequency)))
         return -1;
     return 0;
 }
 
-static uint8_t rom(uint16_t address) {
+static uint8_t read_music_rom(uint16_t cpu_address) {
     unsigned int offset;
-    if (address < SMB_MUSIC_ROM_BASE) return 0;
-    offset = (unsigned int)(address - SMB_MUSIC_ROM_BASE);
+    if (cpu_address < SMB_MUSIC_ROM_BASE)
+        return 0;
+    offset = (unsigned int)(cpu_address - SMB_MUSIC_ROM_BASE);
     return offset < smb_music_rom_len ? smb_music_rom[offset] : 0;
 }
-static uint16_t music_ptr(void) {
-    return (uint16_t)((uint16_t)a.music_data_hi << 8) | a.music_data_lo;
+static uint16_t music_data_pointer(void) {
+    return (uint16_t)((uint16_t)audio_state.music_data_high << 8) | audio_state.music_data_low;
 }
-static void wr(uint16_t address, uint8_t value) { platform_apu_write(address, value); }
-static void status_reload(uint8_t off, uint8_t on) { wr(STATUS, off); wr(STATUS, on); }
+static void apu_write(uint16_t address, uint8_t value) { platform_apu_write(address, value); }
 
-static uint8_t set_freq(uint16_t base, uint8_t offset) {
-    uint8_t lo = rom((uint16_t)(0xff01u + offset));
-    if (!lo) return 0;
-    wr((uint16_t)(base + 2), lo);
-    wr((uint16_t)(base + 3), (uint8_t)(rom((uint16_t)(0xff00u + offset)) | 8));
-    return lo;
-}
-static void play_sq1(uint8_t vol, uint8_t sweep, uint8_t freq) {
-    wr(SQ1 + 1, sweep); wr(SQ1, vol); set_freq(SQ1, freq);
-}
-static void play_sq2(uint8_t vol, uint8_t sweep, uint8_t freq) {
-    wr(SQ2, vol); wr(SQ2 + 1, sweep); set_freq(SQ2, freq);
-}
-static void stop_sq1(void) { a.sq1_buf = 0; status_reload(0x0e, 0x0f); }
-static void stop_sq2(void) { a.sq2_buf = 0; status_reload(0x0d, 0x0f); }
-static void silence_sq2(void) { status_reload(0x0d, 0x0f); }
-static uint8_t sfx_dispatch_bit(uint8_t bits) {
-    uint8_t bit;
-    if (bits & 0x80) return 0x80;
-    bit = (uint8_t)(bits & (uint8_t)(0u - bits));
-    return bit;
+/* SoundEngine toggles the channel-enable bits around a length-counter reset.
+ * The two writes must remain adjacent and in this order. */
+static void reload_apu_status(uint8_t disabled_channels, uint8_t enabled_channels) {
+    apu_write(APU_STATUS, disabled_channels);
+    apu_write(APU_STATUS, enabled_channels);
 }
 
-static void square1_sfx(void) {
-    uint8_t b = g_Square1SoundQueue ? g_Square1SoundQueue : a.sq1_buf;
-    uint8_t selected;
-    int start = g_Square1SoundQueue != 0;
-    if (!b) return;
-    if (start) a.sq1_buf = b;
-    selected = sfx_dispatch_bit(b);
-
-    if (selected == Sfx_SmallJump || selected == Sfx_BigJump) {
-        if (start) { play_sq1(0x82,0xa7,selected == Sfx_SmallJump?0x26:0x18); a.sq1_sfx_len=0x28; }
-        else {
-            if (a.sq1_sfx_len==0x25) { wr(SQ1+1,0xf6); wr(SQ1,0x5f); }
-            else if (a.sq1_sfx_len==0x20) { wr(SQ1+1,0xbc); wr(SQ1,0x48); }
-        }
-    } else if (selected == Sfx_Bump || selected == Sfx_Fireball) {
-        if (start) { play_sq1(0x9e,selected == Sfx_Bump?0x93:0x99,0x0c); a.sq1_sfx_len=selected == Sfx_Bump?0x0a:0x05; }
-        else if (a.sq1_sfx_len==0x06) wr(SQ1+1,0xbb);
-    } else if (selected == Sfx_EnemyStomp) {
-        if (start) { play_sq1(0x9e,0x9c,0x26); a.sq1_sfx_len=0x0e; }
-        { uint8_t n=a.sq1_sfx_len; if(n && n<=14) wr(SQ1,swim_env[n-1]); if(n==6) wr(SQ1+2,0x9e); }
-    } else if (selected == Sfx_EnemySmack) {
-        if (start) { play_sq1(0x9f,0xcb,0x28); a.sq1_sfx_len=0x0e; }
-        else { if(a.sq1_sfx_len==8) wr(SQ1+2,0xa0); wr(SQ1,a.sq1_sfx_len==8?0x9f:0x90); }
-    } else if (selected == Sfx_PipeDown_Injury) {
-        if (start) a.sq1_sfx_len=0x2f;
-        if ((((a.sq1_sfx_len >> 2) & 2) != 0) && !(a.sq1_sfx_len & 3))
-            play_sq1(0x9a,0x91,0x44);
-    } else if (selected == Sfx_Flagpole) {
-        if (start) { a.sq1_sfx_len=0x40; set_freq(SQ1,0x62); wr(SQ1+1,0xbc); wr(SQ1,0x99); }
-    }
-    if (a.sq1_sfx_len && --a.sq1_sfx_len==0) stop_sq1();
+/* The sound tables store the 2A03 timer divider as two bytes.  The argument
+ * is the original note/table index, not a frequency in Hertz. */
+static uint8_t set_frequency(uint16_t channel_base, uint8_t note_index) {
+    uint8_t timer_low = read_music_rom((uint16_t)(MUSIC_FREQUENCY_TABLE_LOW + note_index));
+    if (!timer_low)
+        return 0;
+    apu_write((uint16_t)(channel_base + APU_TIMER_LOW_OFFSET), timer_low);
+    apu_write(
+        (uint16_t)(channel_base + APU_TIMER_HIGH_OFFSET),
+        (uint8_t)(read_music_rom((uint16_t)(MUSIC_FREQUENCY_TABLE_HIGH + note_index)) |
+                  APU_TIMER_HIGH_LENGTH_FLAG));
+    return timer_low;
 }
 
-static void square2_sfx(void) {
-    uint8_t b, selected;
-    int start;
-    if (a.sq2_buf & Sfx_ExtraLife) { b=a.sq2_buf; start=0; }
-    else { b=g_Square2SoundQueue ? g_Square2SoundQueue : a.sq2_buf; start=g_Square2SoundQueue!=0; }
-    if (!b) return;
-    if (start) a.sq2_buf=b;
-    selected=sfx_dispatch_bit(b);
+/* Square 1 deliberately writes sweep before volume; this is the order in
+ * Dump_Squ1_Regs/PlaySqu1Sfx. */
+static void play_square1(uint8_t volume, uint8_t sweep, uint8_t note_index) {
+    apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, sweep);
+    apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, volume);
+    set_frequency(APU_SQUARE1, note_index);
+}
 
-    if (selected == Sfx_BowserFall) {
-        if(start){a.sq2_sfx_len=0x38;play_sq2(0x9f,0xc4,0x18);}
-        else if(a.sq2_sfx_len==8) play_sq2(0x9f,0xa4,0x5a);
-    } else if (selected == Sfx_CoinGrab || selected == Sfx_TimerTick) {
-        if(start){a.sq2_sfx_len=selected == Sfx_CoinGrab?0x35:0x06;play_sq2(selected == Sfx_CoinGrab?0x8d:0x98,0x7f,0x42);}
-        else if(a.sq2_sfx_len==0x30) wr(SQ2+2,0x54);
-    } else if (selected == Sfx_GrowPowerUp || selected == Sfx_GrowVine) {
-        if(start){a.sq2_sfx_len=selected == Sfx_GrowPowerUp?0x10:0x20;a.secondary=0;wr(SQ2+1,0x7f);}
-        ++a.secondary;
-        { uint8_t y=(uint8_t)(a.secondary>>1); if(y==a.sq2_sfx_len){stop_sq2();return;} wr(SQ2,0x9d);set_freq(SQ2,grow_freq[y]); }
+/* Square 2 uses the opposite control-register order in Dump_Sq2_Regs. */
+static void play_square2(uint8_t volume, uint8_t sweep, uint8_t note_index) {
+    apu_write(APU_SQUARE2 + APU_CONTROL_OFFSET, volume);
+    apu_write(APU_SQUARE2 + APU_SWEEP_OFFSET, sweep);
+    set_frequency(APU_SQUARE2, note_index);
+}
+static void stop_square1(void) {
+    audio_state.square1_buffer = 0;
+    reload_apu_status(APU_STATUS_DISABLE_SQUARE1, APU_STATUS_ENABLE_CHANNELS);
+}
+static void stop_square2(void) {
+    audio_state.square2_buffer = 0;
+    reload_apu_status(APU_STATUS_DISABLE_SQUARE2, APU_STATUS_ENABLE_CHANNELS);
+}
+static void silence_square2(void) {
+    reload_apu_status(APU_STATUS_DISABLE_SQUARE2, APU_STATUS_ENABLE_CHANNELS);
+}
+
+/* The queue is a priority bitfield.  Bit 7 is tested first by the ASM; for
+ * the remaining bits, the two's-complement low-bit operation reproduces the
+ * successive LSR/BCS tests without changing the queue value. */
+static uint8_t select_sound_effect(uint8_t queue_bits) {
+    if (queue_bits & SFX_SMALL_JUMP)
+        return SFX_SMALL_JUMP;
+    return (uint8_t)(queue_bits & (uint8_t)(0u - queue_bits));
+}
+
+static void handle_square1_jump(uint8_t effect, int is_start) {
+    if (is_start) {
+        play_square1(SFX_JUMP_VOLUME, SFX_JUMP_SWEEP,
+                     effect == Sfx_SmallJump ? SFX_SMALL_JUMP_NOTE_INDEX : SFX_BIG_JUMP_NOTE_INDEX);
+        audio_state.square1_sfx_length_counter = SFX_JUMP_LENGTH;
         return;
-    } else if (selected == Sfx_Blast) {
-        if(start){a.sq2_sfx_len=0x20;play_sq2(0x9f,0x94,0x5e);}
-        else if(a.sq2_sfx_len==0x18) play_sq2(0x9f,0x93,0x18);
-    } else if (selected == Sfx_PowerUpGrab) {
-        if(start)a.sq2_sfx_len=0x36;
-        if(!(a.sq2_sfx_len&1)){uint8_t y=(uint8_t)(a.sq2_sfx_len>>1);if(y&&y<=27)play_sq2(0x5d,0x7f,powerup_freq[y-1]);}
-    } else if (selected == Sfx_ExtraLife) {
-        if(start)a.sq2_sfx_len=0x30;
-        if(!(a.sq2_sfx_len&7)){uint8_t y=(uint8_t)(a.sq2_sfx_len>>3);if(y&&y<=6)play_sq2(0x82,0x7f,extra_life_freq[y-1]);}
     }
-    if(a.sq2_sfx_len && --a.sq2_sfx_len==0) stop_sq2();
-}
 
-static void noise_sfx(void) {
-    uint8_t b=g_NoiseSoundQueue?g_NoiseSoundQueue:a.noise_buf;
-    int start=g_NoiseSoundQueue!=0;
-    uint8_t y, env, period;
-    if(!b)return;
-    if(start)a.noise_buf=b;
-    if(b&Sfx_BrickShatter){if(start)a.noise_sfx_len=0x20;y=(uint8_t)(a.noise_sfx_len>>1);if((a.noise_sfx_len&1)&&y<16){period=brick_freq[y];env=rom((uint16_t)(0xffeau+y));wr(NOISE,env);wr(NOISE+2,period);wr(NOISE+3,0x18);}}
-    /* ContinueBowserFlame (main.asm:13024-13030) uses the LSR result only
-     * as the envelope-table index; unlike ContinueBrickShatter, it does not
-     * branch on the carry or on a nonzero result.  Thus the final counter
-     * value $01 still writes BowserFlameEnvData-1 ($400c=$93) before the
-     * shared decrement emits the terminal $f0. */
-    else if(b&Sfx_BowserFlame){if(start)a.noise_sfx_len=0x40;y=(uint8_t)(a.noise_sfx_len>>1);env=rom((uint16_t)(0xffc9u+y));wr(NOISE,env);wr(NOISE+2,0x0f);wr(NOISE+3,0x18);}
-    if(a.noise_sfx_len&&--a.noise_sfx_len==0){wr(NOISE,0xf0);a.noise_buf=0;}
-}
-
-static uint8_t note_length(uint8_t index) {
-    return rom((uint16_t)(0xff66u + ((index&7)+a.note_table+a.note_adder)));
-}
-static uint8_t alternate_length(uint8_t value) {
-    uint8_t index=(uint8_t)(((value&1)<<2)|((value>>6)&3));
-    return note_length(index);
-}
-static uint8_t envelope(uint8_t y) {
-    if(g_EventMusicBuffer&EndOfCastleMusic)return rom((uint16_t)(0xff96u+y));
-    if((a.area_buf&0x7d)==0)return rom((uint16_t)(0xffa2u+y));
-    return rom((uint16_t)(0xff9au+y));
-}
-static uint8_t control_value(void) {
-    if(g_EventMusicBuffer&EndOfCastleMusic)return 4;
-    return ((a.area_buf&0x7d)==0)?0x28:8;
-}
-
-static void load_header(uint8_t offset) {
-    uint16_t p=(uint16_t)(SMB_MUSIC_ROM_BASE+offset);
-    a.note_table=rom(p);a.music_data_lo=rom(++p);a.music_data_hi=rom(++p);
-    a.off_tri=rom(++p);a.off_sq1=rom(++p);a.off_noise=rom(++p);a.noise_loop=a.off_noise;
-    a.sq2_len=a.sq1_len=a.tri_len=a.noise_len=1;a.off_sq2=0;a.alt_reg=0;
-    status_reload(0x0b,0x0f);
-}
-static uint8_t header_index(uint8_t queue,uint8_t y) {
-    do{++y;if(queue&1)return y;queue>>=1;}while(queue);return y;
-}
-static void load_event_music(uint8_t q) {
-    uint8_t y=0;
-    g_EventMusicBuffer=q;
-    if(q==DeathMusic){stop_sq1();silence_sq2();}
-    a.area_alt=a.area_buf;a.note_adder=0;a.area_buf=0;
-    if(q==TimeRunningOutMusic)a.note_adder=8;
-    y=header_index(q,y);
-    load_header(rom((uint16_t)(0xf90cu+y)));
-}
-static void load_area_music(uint8_t q, int fresh_queue) {
-    uint8_t y;
-    if(fresh_queue){
-        if(q==UndergroundMusic)stop_sq1();
-        a.ground_header=0x10;
+    if (audio_state.square1_sfx_length_counter == SFX_JUMP_SECOND_PHASE) {
+        apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, SFX_JUMP_SECOND_SWEEP);
+        apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, SFX_JUMP_SECOND_VOLUME);
+    } else if (audio_state.square1_sfx_length_counter == SFX_JUMP_THIRD_PHASE) {
+        apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, SFX_JUMP_THIRD_SWEEP);
+        apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, SFX_JUMP_THIRD_VOLUME);
     }
-    g_EventMusicBuffer=0;a.area_buf=q;
-    if(q==GroundMusic){
-        if(++a.ground_header==0x32)a.ground_header=0x11;
-        y=a.ground_header;
-    }else y=header_index(q,8);
-    load_header(rom((uint16_t)(0xf90cu+y)));
 }
-static void music_handler(void) {
-    uint8_t q, byte, x, ctrl;
+
+static void handle_square1_bump_or_fireball(uint8_t effect, int is_start) {
+    if (is_start) {
+        play_square1(SFX_BUMP_VOLUME, effect == Sfx_Bump ? SFX_BUMP_SWEEP : SFX_FIREBALL_SWEEP,
+                     SFX_BUMP_NOTE_INDEX);
+        audio_state.square1_sfx_length_counter =
+            effect == Sfx_Bump ? SFX_BUMP_LENGTH : SFX_FIREBALL_LENGTH;
+    } else if (audio_state.square1_sfx_length_counter == SFX_SECOND_TONE_PHASE) {
+        apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, SFX_BUMP_SECOND_SWEEP);
+    }
+}
+
+static void handle_square1_stomp(int is_start) {
+    if (is_start) {
+        play_square1(SFX_BUMP_VOLUME, SFX_STOMP_SWEEP, SFX_STOMP_NOTE_INDEX);
+        audio_state.square1_sfx_length_counter = SFX_SWIM_STOMP_LENGTH;
+    }
+
+    {
+        uint8_t counter = audio_state.square1_sfx_length_counter;
+        if (counter && counter <= sizeof(swim_stomp_envelope))
+            apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, swim_stomp_envelope[counter - 1]);
+        if (counter == SFX_STOMP_TIMER_PHASE)
+            apu_write(APU_SQUARE1 + APU_TIMER_LOW_OFFSET, SFX_STOMP_TIMER_LOW);
+    }
+}
+
+static void handle_square1_smacked_enemy(int is_start) {
+    if (is_start) {
+        play_square1(SFX_SMACK_VOLUME, SFX_SMACK_SWEEP, SFX_SMACK_NOTE_INDEX);
+        audio_state.square1_sfx_length_counter = SFX_SMACK_LENGTH;
+        return;
+    }
+
+    if (audio_state.square1_sfx_length_counter == SFX_SMACK_SECOND_PHASE)
+        apu_write(APU_SQUARE1 + APU_TIMER_LOW_OFFSET, SFX_SMACK_TIMER_LOW);
+    apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET,
+              audio_state.square1_sfx_length_counter == SFX_SMACK_SECOND_PHASE
+                  ? SFX_SMACK_SECOND_VOLUME
+                  : APU_SQUARE_VOLUME_SILENT);
+}
+
+static void handle_square1_pipe_injury(int is_start) {
+    if (is_start)
+        audio_state.square1_sfx_length_counter = SFX_PIPE_INJURY_LENGTH;
+
+    if ((((audio_state.square1_sfx_length_counter >> 2) & 2) != 0) &&
+        !(audio_state.square1_sfx_length_counter & 3))
+        play_square1(SFX_PIPE_VOLUME, SFX_PIPE_SWEEP, SFX_PIPE_NOTE_INDEX);
+}
+
+static void handle_square1_flagpole(int is_start) {
+    if (!is_start)
+        return;
+
+    audio_state.square1_sfx_length_counter = SFX_FLAGPOLE_LENGTH;
+    set_frequency(APU_SQUARE1, SFX_FLAGPOLE_NOTE_INDEX);
+    apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, SFX_FLAGPOLE_SWEEP);
+    apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, SFX_FLAGPOLE_VOLUME);
+}
+
+static void handle_square1_sfx(void) {
+    uint8_t queue_bits = g_Square1SoundQueue ? g_Square1SoundQueue : audio_state.square1_buffer;
+    uint8_t selected_effect;
+    int is_start = g_Square1SoundQueue != 0;
+
+    if (!queue_bits)
+        return;
+    if (is_start)
+        audio_state.square1_buffer = queue_bits;
+
+    selected_effect = select_sound_effect(queue_bits);
+    switch (selected_effect) {
+    case Sfx_SmallJump:
+    case Sfx_BigJump:
+        handle_square1_jump(selected_effect, is_start);
+        break;
+    case Sfx_Bump:
+    case Sfx_Fireball:
+        handle_square1_bump_or_fireball(selected_effect, is_start);
+        break;
+    case Sfx_EnemyStomp:
+        handle_square1_stomp(is_start);
+        break;
+    case Sfx_EnemySmack:
+        handle_square1_smacked_enemy(is_start);
+        break;
+    case Sfx_PipeDown_Injury:
+        handle_square1_pipe_injury(is_start);
+        break;
+    case Sfx_Flagpole:
+        handle_square1_flagpole(is_start);
+        break;
+    default:
+        break;
+    }
+
+    if (audio_state.square1_sfx_length_counter && --audio_state.square1_sfx_length_counter == 0)
+        stop_square1();
+}
+
+static void handle_square2_bowser_fall(int is_start) {
+    if (is_start) {
+        audio_state.square2_sfx_length_counter = SFX_BOWSER_FALL_LENGTH;
+        play_square2(SFX_BOWSER_FALL_VOLUME, SFX_BOWSER_FALL_SWEEP, SFX_BOWSER_FALL_NOTE_INDEX);
+    } else if (audio_state.square2_sfx_length_counter == SFX_BOWSER_FALL_SECOND_PHASE) {
+        play_square2(SFX_BOWSER_FALL_VOLUME, SFX_BOWSER_FALL_SECOND_SWEEP,
+                     SFX_BOWSER_FALL_SECOND_NOTE_INDEX);
+    }
+}
+
+static void handle_square2_coin_or_timer(uint8_t effect, int is_start) {
+    if (is_start) {
+        audio_state.square2_sfx_length_counter =
+            effect == Sfx_CoinGrab ? SFX_COIN_LENGTH : SFX_TIMER_LENGTH;
+        play_square2(effect == Sfx_CoinGrab ? SFX_COIN_VOLUME : SFX_TIMER_VOLUME,
+                     APU_SQUARE_SWEEP_DEFAULT, SFX_COIN_TIMER_NOTE_INDEX);
+    } else if (audio_state.square2_sfx_length_counter == SFX_COIN_TIMER_SECOND_PHASE) {
+        apu_write(APU_SQUARE2 + APU_TIMER_LOW_OFFSET, SFX_TIMER_SECOND_TIMER_LOW);
+    }
+}
+
+/* Growth sounds use a secondary counter.  The normal SFX length counter is
+ * intentionally not decremented here; this is the ContinueGrowItems path. */
+static void handle_square2_growth(uint8_t effect, int is_start) {
+    if (is_start) {
+        audio_state.square2_sfx_length_counter =
+            effect == Sfx_GrowPowerUp ? SFX_GROW_POWERUP_LENGTH : SFX_GROW_VINE_LENGTH;
+        audio_state.sfx_secondary_counter = 0;
+        apu_write(APU_SQUARE2 + APU_SWEEP_OFFSET, APU_SQUARE_SWEEP_DEFAULT);
+    }
+
+    ++audio_state.sfx_secondary_counter;
+    {
+        uint8_t table_index = (uint8_t)(audio_state.sfx_secondary_counter >> 1);
+        if (table_index == audio_state.square2_sfx_length_counter) {
+            stop_square2();
+            return;
+        }
+        apu_write(APU_SQUARE2 + APU_CONTROL_OFFSET, SFX_GROW_VOLUME);
+        set_frequency(APU_SQUARE2, powerup_vgrow_frequency[table_index]);
+    }
+}
+
+static void handle_square2_blast(int is_start) {
+    if (is_start) {
+        audio_state.square2_sfx_length_counter = SFX_BLAST_LENGTH;
+        play_square2(SFX_BLAST_VOLUME, SFX_BLAST_SWEEP, SFX_BLAST_NOTE_INDEX);
+    } else if (audio_state.square2_sfx_length_counter == SFX_BLAST_SECOND_PHASE) {
+        play_square2(SFX_BLAST_VOLUME, SFX_BLAST_SECOND_SWEEP, SFX_BLAST_SECOND_NOTE_INDEX);
+    }
+}
+
+static void handle_square2_powerup_grab(int is_start) {
+    if (is_start)
+        audio_state.square2_sfx_length_counter = SFX_POWERUP_GRAB_LENGTH;
+    if (!(audio_state.square2_sfx_length_counter & 1)) {
+        uint8_t table_index = (uint8_t)(audio_state.square2_sfx_length_counter >> 1);
+        if (table_index && table_index <= sizeof(powerup_grab_frequency))
+            play_square2(SFX_POWERUP_GRAB_VOLUME, APU_SQUARE_SWEEP_DEFAULT,
+                         powerup_grab_frequency[table_index - 1]);
+    }
+}
+
+static void handle_square2_extra_life(int is_start) {
+    if (is_start)
+        audio_state.square2_sfx_length_counter = SFX_EXTRA_LIFE_LENGTH;
+    if (!(audio_state.square2_sfx_length_counter & 7)) {
+        uint8_t table_index = (uint8_t)(audio_state.square2_sfx_length_counter >> 3);
+        if (table_index && table_index <= sizeof(extra_life_frequency))
+            play_square2(SFX_EXTRA_LIFE_VOLUME, APU_SQUARE_SWEEP_DEFAULT,
+                         extra_life_frequency[table_index - 1]);
+    }
+}
+
+static void handle_square2_sfx(void) {
+    uint8_t queue_bits;
+    uint8_t selected_effect;
+    int is_start;
+
+    /* Extra life has the same channel-locking special case as the ASM. */
+    if (audio_state.square2_buffer & Sfx_ExtraLife) {
+        queue_bits = audio_state.square2_buffer;
+        is_start = 0;
+    } else {
+        queue_bits = g_Square2SoundQueue ? g_Square2SoundQueue : audio_state.square2_buffer;
+        is_start = g_Square2SoundQueue != 0;
+    }
+    if (!queue_bits)
+        return;
+    if (is_start)
+        audio_state.square2_buffer = queue_bits;
+
+    selected_effect = select_sound_effect(queue_bits);
+    switch (selected_effect) {
+    case Sfx_BowserFall:
+        handle_square2_bowser_fall(is_start);
+        break;
+    case Sfx_CoinGrab:
+    case Sfx_TimerTick:
+        handle_square2_coin_or_timer(selected_effect, is_start);
+        break;
+    case Sfx_GrowPowerUp:
+    case Sfx_GrowVine:
+        handle_square2_growth(selected_effect, is_start);
+        return;
+    case Sfx_Blast:
+        handle_square2_blast(is_start);
+        break;
+    case Sfx_PowerUpGrab:
+        handle_square2_powerup_grab(is_start);
+        break;
+    case Sfx_ExtraLife:
+        handle_square2_extra_life(is_start);
+        break;
+    default:
+        break;
+    }
+
+    if (audio_state.square2_sfx_length_counter && --audio_state.square2_sfx_length_counter == 0)
+        stop_square2();
+}
+
+static void handle_noise_sfx(void) {
+    uint8_t queue_bits = g_NoiseSoundQueue ? g_NoiseSoundQueue : audio_state.noise_buffer;
+    int is_start = g_NoiseSoundQueue != 0;
+
+    if (!queue_bits)
+        return;
+    if (is_start)
+        audio_state.noise_buffer = queue_bits;
+
+    if (queue_bits & Sfx_BrickShatter) {
+        if (is_start)
+            audio_state.noise_sfx_length_counter = SFX_BRICK_SHATTER_LENGTH;
+
+        {
+            uint8_t table_index = (uint8_t)(audio_state.noise_sfx_length_counter >> 1);
+            if ((audio_state.noise_sfx_length_counter & 1) &&
+                table_index < sizeof(brick_shatter_frequency)) {
+                uint8_t period = brick_shatter_frequency[table_index];
+                uint8_t envelope =
+                    read_music_rom((uint16_t)(MUSIC_BRICK_SHATTER_ENVELOPE + table_index));
+                apu_write(APU_NOISE + APU_CONTROL_OFFSET, envelope);
+                apu_write(APU_NOISE + APU_TIMER_LOW_OFFSET, period);
+                apu_write(APU_NOISE + APU_TIMER_HIGH_OFFSET, APU_NOISE_LENGTH_SHORT);
+            }
+        }
+    } else if (queue_bits & Sfx_BowserFlame) {
+        /* ContinueBowserFlame (main.asm:13024-13030) uses the LSR result
+         * only as the envelope-table index; unlike ContinueBrickShatter, it
+         * does not branch on the carry or on a nonzero result.  Thus the final
+         * counter value $01 still writes BowserFlameEnvData-1 ($400c=$93)
+         * before the shared decrement emits the terminal $f0. */
+        if (is_start)
+            audio_state.noise_sfx_length_counter = SFX_BOWSER_FLAME_LENGTH;
+
+        {
+            uint8_t table_index = (uint8_t)(audio_state.noise_sfx_length_counter >> 1);
+            uint8_t envelope =
+                read_music_rom((uint16_t)(MUSIC_BOWSER_FLAME_ENVELOPE + table_index));
+            apu_write(APU_NOISE + APU_CONTROL_OFFSET, envelope);
+            apu_write(APU_NOISE + APU_TIMER_LOW_OFFSET, APU_NOISE_BOWSER_PERIOD);
+            apu_write(APU_NOISE + APU_TIMER_HIGH_OFFSET, APU_NOISE_LENGTH_SHORT);
+        }
+    }
+
+    if (audio_state.noise_sfx_length_counter && --audio_state.noise_sfx_length_counter == 0) {
+        apu_write(APU_NOISE + APU_CONTROL_OFFSET, APU_NOISE_VOLUME_SILENT);
+        audio_state.noise_buffer = 0;
+    }
+}
+
+static uint8_t lookup_note_length(uint8_t encoded_index) {
+    uint8_t table_index = (uint8_t)(encoded_index & MUSIC_LENGTH_INDEX_MASK);
+    return read_music_rom((uint16_t)(MUSIC_LENGTH_TABLE + table_index +
+                                     audio_state.note_length_table_offset +
+                                     audio_state.note_length_table_adder));
+}
+
+static uint8_t lookup_alternate_length(uint8_t encoded_note) {
+    /* AlternateLengthHandler rotates bits xx00000x into 00000xxx. */
+    uint8_t length_index = (uint8_t)(((encoded_note & 1) << 2) | ((encoded_note >> 6) & 3));
+    return lookup_note_length(length_index);
+}
+
+static uint8_t lookup_envelope(uint8_t envelope_index) {
+    if (g_EventMusicBuffer & EndOfCastleMusic)
+        return read_music_rom((uint16_t)(MUSIC_END_CASTLE_ENVELOPE + envelope_index));
+    if ((audio_state.area_music_buffer & MUSIC_AREA_CONTROL_MASK) == 0)
+        return read_music_rom((uint16_t)(MUSIC_WATER_EVENT_ENVELOPE + envelope_index));
+    return read_music_rom((uint16_t)(MUSIC_AREA_ENVELOPE + envelope_index));
+}
+
+static uint8_t music_control_value(void) {
+    if (g_EventMusicBuffer & EndOfCastleMusic)
+        return MUSIC_CONTROL_END_CASTLE;
+    return ((audio_state.area_music_buffer & MUSIC_AREA_CONTROL_MASK) == 0)
+               ? MUSIC_CONTROL_WATER_EVENT
+               : MUSIC_CONTROL_STANDARD;
+}
+
+static void load_music_header(uint8_t offset) {
+    uint16_t header_address = (uint16_t)(SMB_MUSIC_ROM_BASE + offset);
+
+    audio_state.note_length_table_offset = read_music_rom(header_address);
+    audio_state.music_data_low = read_music_rom(++header_address);
+    audio_state.music_data_high = read_music_rom(++header_address);
+    audio_state.music_offset_triangle = read_music_rom(++header_address);
+    audio_state.music_offset_square1 = read_music_rom(++header_address);
+    audio_state.music_offset_noise = read_music_rom(++header_address);
+    audio_state.noise_loopback_offset = audio_state.music_offset_noise;
+    audio_state.square2_note_length_counter = 1;
+    audio_state.square1_note_length_counter = 1;
+    audio_state.triangle_note_length_counter = 1;
+    audio_state.noise_beat_length_counter = 1;
+    audio_state.music_offset_square2 = 0;
+    audio_state.alternate_register_content_flag = 0;
+    reload_apu_status(APU_STATUS_DISABLE_TRIANGLE, APU_STATUS_ENABLE_CHANNELS);
+}
+
+/* The ASM shifts the selected music bit until it finds the first set flag.
+ * The resulting index addresses MusicHeaderOffsetData. */
+static uint8_t music_header_index(uint8_t queue_bits, uint8_t initial_index) {
+    uint8_t header_index = initial_index;
+    do {
+        ++header_index;
+        if (queue_bits & 1)
+            return header_index;
+        queue_bits >>= 1;
+    } while (queue_bits);
+    return header_index;
+}
+
+static void load_event_music(uint8_t music_queue) {
+    uint8_t header_index;
+
+    g_EventMusicBuffer = music_queue;
+    if (music_queue == DeathMusic) {
+        stop_square1();
+        silence_square2();
+    }
+    audio_state.area_music_buffer_alt = audio_state.area_music_buffer;
+    audio_state.note_length_table_adder = 0;
+    audio_state.area_music_buffer = 0;
+    if (music_queue == TimeRunningOutMusic)
+        audio_state.note_length_table_adder = 8;
+    header_index = music_header_index(music_queue, 0);
+    load_music_header(read_music_rom((uint16_t)(MUSIC_HEADER_OFFSET_TABLE + header_index)));
+}
+
+static void load_area_music(uint8_t music_queue, int is_new_queue) {
+    uint8_t header_index;
+
+    if (is_new_queue) {
+        if (music_queue == UndergroundMusic)
+            stop_square1();
+        audio_state.ground_music_header_offset = MUSIC_GROUND_HEADER_START;
+    }
+    g_EventMusicBuffer = 0;
+    audio_state.area_music_buffer = music_queue;
+    if (music_queue == GroundMusic) {
+        if (++audio_state.ground_music_header_offset == MUSIC_GROUND_HEADER_END)
+            audio_state.ground_music_header_offset = MUSIC_GROUND_HEADER_LOOP;
+        header_index = audio_state.ground_music_header_offset;
+    } else
+        header_index = music_header_index(music_queue, MUSIC_AREA_HEADER_INDEX_START);
+    load_music_header(read_music_rom((uint16_t)(MUSIC_HEADER_OFFSET_TABLE + header_index)));
+}
+static void handle_music(void) {
+    uint8_t music_queue;
+    uint8_t stream_byte;
+    uint8_t encoded_note;
+    uint8_t control;
 
     if (g_EventMusicQueue)
         load_event_music(g_EventMusicQueue);
     else if (g_AreaMusicQueue)
         load_area_music(g_AreaMusicQueue, 1);
-    else if (!(g_EventMusicBuffer | a.area_buf))
+    else if (!(g_EventMusicBuffer | audio_state.area_music_buffer))
         return;
 
+    /* MusicHandler first services square 2.  A song terminator can reload a
+     * header and restart this section, so this loop is intentional. */
     for (;;) {
-        if (--a.sq2_len == 0) {
-            byte = rom((uint16_t)(music_ptr() + a.off_sq2++));
-            if (!byte) {
-                if (g_EventMusicBuffer == TimeRunningOutMusic && a.area_alt) {
-                    load_area_music(a.area_alt, 0);
+        if (--audio_state.square2_note_length_counter == 0) {
+            stream_byte = read_music_rom(
+                (uint16_t)(music_data_pointer() + audio_state.music_offset_square2++));
+            if (!stream_byte) {
+                if (g_EventMusicBuffer == TimeRunningOutMusic &&
+                    audio_state.area_music_buffer_alt) {
+                    load_area_music(audio_state.area_music_buffer_alt, 0);
                     continue;
                 }
                 if (g_EventMusicBuffer & VictoryMusic) {
-                    q = g_EventMusicBuffer;
-                    load_event_music(q);
+                    music_queue = g_EventMusicBuffer;
+                    load_event_music(music_queue);
                     continue;
                 }
-                if (a.area_buf & 0x5f) {
-                    q = a.area_buf;
-                    load_area_music(q, 0);
+                if (audio_state.area_music_buffer & MUSIC_AREA_LOOP_MASK) {
+                    music_queue = audio_state.area_music_buffer;
+                    load_area_music(music_queue, 0);
                     continue;
                 }
-                a.area_buf = g_EventMusicBuffer = 0;
-                wr(TRI, 0);
-                wr(SQ1, 0x90);
-                wr(SQ2, 0x90);
+                audio_state.area_music_buffer = g_EventMusicBuffer = 0;
+                apu_write(APU_TRIANGLE + APU_CONTROL_OFFSET, 0);
+                apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, APU_SQUARE_VOLUME_SILENT);
+                apu_write(APU_SQUARE2 + APU_CONTROL_OFFSET, APU_SQUARE_VOLUME_SILENT);
                 return;
             }
-            if (byte & 0x80) {
-                a.sq2_len_buf = note_length(byte);
-                byte = rom((uint16_t)(music_ptr() + a.off_sq2++));
+            if (stream_byte & MUSIC_LENGTH_FLAG) {
+                audio_state.square2_note_length_buffer = lookup_note_length(stream_byte);
+                stream_byte = read_music_rom(
+                    (uint16_t)(music_data_pointer() + audio_state.music_offset_square2++));
             }
-            if (!a.sq2_buf) {
-                uint8_t tone = set_freq(SQ2, byte);
-                ctrl = tone ? control_value() : 0;
-                a.sq2_env = ctrl;
-                if (tone) {
-                    wr(SQ2, 0x82);
-                    wr(SQ2 + 1, 0x7f);
+            if (!audio_state.square2_buffer) {
+                uint8_t timer_low = set_frequency(APU_SQUARE2, stream_byte);
+                control = timer_low ? music_control_value() : 0;
+                audio_state.square2_envelope = control;
+                if (timer_low) {
+                    apu_write(APU_SQUARE2 + APU_CONTROL_OFFSET, APU_SQUARE_VOLUME_MUSIC);
+                    apu_write(APU_SQUARE2 + APU_SWEEP_OFFSET, APU_SQUARE_SWEEP_DEFAULT);
                 } else {
-                    wr(SQ2, 0x04);
-                    wr(SQ2 + 1, byte);
+                    apu_write(APU_SQUARE2 + APU_CONTROL_OFFSET, APU_SQUARE_VOLUME_MUSIC_REST);
+                    apu_write(APU_SQUARE2 + APU_SWEEP_OFFSET, stream_byte);
                 }
             }
-            a.sq2_len = a.sq2_len_buf;
+            audio_state.square2_note_length_counter = audio_state.square2_note_length_buffer;
         }
         break;
     }
 
-    if (!a.sq2_buf && !(g_EventMusicBuffer & 0x91)) {
-        uint8_t env_index = a.sq2_env;
-        if (a.sq2_env)
-            --a.sq2_env;
-        wr(SQ2, envelope(env_index));
-        wr(SQ2 + 1, 0x7f);
+    if (!audio_state.square2_buffer && !(g_EventMusicBuffer & MUSIC_ENVELOPE_SKIP_MASK)) {
+        uint8_t envelope_index = audio_state.square2_envelope;
+        if (audio_state.square2_envelope)
+            --audio_state.square2_envelope;
+        apu_write(APU_SQUARE2 + APU_CONTROL_OFFSET, lookup_envelope(envelope_index));
+        apu_write(APU_SQUARE2 + APU_SWEEP_OFFSET, APU_SQUARE_SWEEP_DEFAULT);
     }
 
-    if (a.off_sq1) {
-        if (--a.sq1_len == 0) {
+    if (audio_state.music_offset_square1) {
+        if (--audio_state.square1_note_length_counter == 0) {
             do {
-                byte = rom((uint16_t)(music_ptr() + a.off_sq1++));
-                if (!byte) {
-                    wr(SQ1, 0x83);
-                    wr(SQ1 + 1, 0x94);
-                    a.alt_reg = 0x94;
+                stream_byte = read_music_rom(
+                    (uint16_t)(music_data_pointer() + audio_state.music_offset_square1++));
+                if (!stream_byte) {
+                    apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, APU_SQUARE1_VOLUME_STREAM_END);
+                    apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, APU_SQUARE1_SWEEP_STREAM_END);
+                    audio_state.alternate_register_content_flag = APU_SQUARE1_SWEEP_STREAM_END;
                 }
-            } while (!byte);
-            a.sq1_len = alternate_length(byte);
-            if (!a.sq1_buf) {
-                uint8_t tone;
-                x = (uint8_t)(byte & 0x3e);
-                tone = set_freq(SQ1, x);
-                ctrl = tone ? control_value() : 0;
-                a.sq1_env = ctrl;
-                if (tone) {
-                    wr(SQ1 + 1, 0x7f);
-                    wr(SQ1, 0x82);
+            } while (!stream_byte);
+            audio_state.square1_note_length_counter = lookup_alternate_length(stream_byte);
+            if (!audio_state.square1_buffer) {
+                uint8_t timer_low;
+                encoded_note = (uint8_t)(stream_byte & MUSIC_NOTE_MASK);
+                timer_low = set_frequency(APU_SQUARE1, encoded_note);
+                control = timer_low ? music_control_value() : 0;
+                audio_state.square1_envelope = control;
+                if (timer_low) {
+                    apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, APU_SQUARE_SWEEP_DEFAULT);
+                    apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, APU_SQUARE_VOLUME_MUSIC);
                 } else {
-                    wr(SQ1 + 1, x);
-                    wr(SQ1, 0);
+                    apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET, encoded_note);
+                    apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, MUSIC_SQUARE_INVALID_VOLUME);
                 }
             }
         }
-        if (!a.sq1_buf) {
-            if (!(g_EventMusicBuffer & 0x91)) {
-                uint8_t env_index = a.sq1_env;
-                if (a.sq1_env)
-                    --a.sq1_env;
-                wr(SQ1, envelope(env_index));
+        if (!audio_state.square1_buffer) {
+            if (!(g_EventMusicBuffer & MUSIC_ENVELOPE_SKIP_MASK)) {
+                uint8_t envelope_index = audio_state.square1_envelope;
+                if (audio_state.square1_envelope)
+                    --audio_state.square1_envelope;
+                apu_write(APU_SQUARE1 + APU_CONTROL_OFFSET, lookup_envelope(envelope_index));
             }
-            wr(SQ1 + 1, a.alt_reg ? a.alt_reg : 0x7f);
+            apu_write(APU_SQUARE1 + APU_SWEEP_OFFSET,
+                      audio_state.alternate_register_content_flag
+                          ? audio_state.alternate_register_content_flag
+                          : APU_SQUARE_SWEEP_DEFAULT);
         }
     }
 
-    if (--a.tri_len == 0) {
-        byte = rom((uint16_t)(music_ptr() + a.off_tri++));
-        if (byte & 0x80) {
-            a.tri_len_buf = note_length(byte);
-            wr(TRI, 0x1f);
-            byte = rom((uint16_t)(music_ptr() + a.off_tri++));
+    if (--audio_state.triangle_note_length_counter == 0) {
+        stream_byte =
+            read_music_rom((uint16_t)(music_data_pointer() + audio_state.music_offset_triangle++));
+        if (stream_byte & MUSIC_LENGTH_FLAG) {
+            audio_state.triangle_note_length_buffer = lookup_note_length(stream_byte);
+            apu_write(APU_TRIANGLE + APU_CONTROL_OFFSET, APU_TRIANGLE_CONTROL_SHORT);
+            stream_byte = read_music_rom(
+                (uint16_t)(music_data_pointer() + audio_state.music_offset_triangle++));
         }
-        if (byte) {
-            set_freq(TRI, byte);
-            a.tri_len = a.tri_len_buf;
-            if ((g_EventMusicBuffer & 0x6e) || (a.area_buf & 0x0a)) {
-                ctrl = (a.tri_len >= 0x12) ? 0xff
-                    : ((g_EventMusicBuffer & EndOfCastleMusic) ? 0x0f : 0x1f);
-                wr(TRI, ctrl);
+        if (stream_byte) {
+            set_frequency(APU_TRIANGLE, stream_byte);
+            audio_state.triangle_note_length_counter = audio_state.triangle_note_length_buffer;
+            if ((g_EventMusicBuffer & MUSIC_TRIANGLE_EVENT_MASK) ||
+                (audio_state.area_music_buffer & MUSIC_TRIANGLE_AREA_MASK)) {
+                control =
+                    (audio_state.triangle_note_length_counter >= MUSIC_LONG_TRIANGLE_NOTE)
+                        ? APU_TRIANGLE_CONTROL_LONG
+                        : ((g_EventMusicBuffer & EndOfCastleMusic) ? APU_TRIANGLE_CONTROL_CASTLE
+                                                                   : APU_TRIANGLE_CONTROL_SHORT);
+                apu_write(APU_TRIANGLE + APU_CONTROL_OFFSET, control);
             }
         } else {
-            wr(TRI, 0);
+            apu_write(APU_TRIANGLE + APU_CONTROL_OFFSET, 0);
         }
     }
 
-    if ((a.area_buf & 0xf3) != 0) {
-        if (--a.noise_len == 0) {
+    if (audio_state.area_music_buffer & MUSIC_NOISE_AREA_MASK) {
+        if (--audio_state.noise_beat_length_counter == 0) {
             do {
-                byte = rom((uint16_t)(music_ptr() + a.off_noise++));
-                if (!byte)
-                    a.off_noise = a.noise_loop;
-            } while (!byte);
-            a.noise_len = alternate_length(byte);
-            x = (uint8_t)(byte & 0x3e);
-            if (x == 0x30) {
-                wr(NOISE, 0x1c);
-                wr(NOISE + 2, 3);
-                wr(NOISE + 3, 0x58);
-            } else if (x == 0x20) {
-                wr(NOISE, 0x1c);
-                wr(NOISE + 2, 0x0c);
-                wr(NOISE + 3, 0x18);
-            } else if (x & 0x10) {
-                wr(NOISE, 0x1c);
-                wr(NOISE + 2, 3);
-                wr(NOISE + 3, 0x18);
+                stream_byte = read_music_rom(
+                    (uint16_t)(music_data_pointer() + audio_state.music_offset_noise++));
+                if (!stream_byte)
+                    audio_state.music_offset_noise = audio_state.noise_loopback_offset;
+            } while (!stream_byte);
+            audio_state.noise_beat_length_counter = lookup_alternate_length(stream_byte);
+            encoded_note = (uint8_t)(stream_byte & MUSIC_NOTE_MASK);
+            if (encoded_note == MUSIC_NOISE_LONG_BEAT) {
+                apu_write(APU_NOISE + APU_CONTROL_OFFSET, APU_NOISE_VOLUME_MUSIC);
+                apu_write(APU_NOISE + APU_TIMER_LOW_OFFSET, MUSIC_NOISE_LONG_PERIOD);
+                apu_write(APU_NOISE + APU_TIMER_HIGH_OFFSET, APU_NOISE_LENGTH_LONG);
+            } else if (encoded_note == MUSIC_NOISE_STRONG_BEAT) {
+                apu_write(APU_NOISE + APU_CONTROL_OFFSET, APU_NOISE_VOLUME_MUSIC);
+                apu_write(APU_NOISE + APU_TIMER_LOW_OFFSET, MUSIC_NOISE_STRONG_PERIOD);
+                apu_write(APU_NOISE + APU_TIMER_HIGH_OFFSET, APU_NOISE_LENGTH_SHORT);
+            } else if (encoded_note & MUSIC_NOISE_SHORT_BEAT) {
+                apu_write(APU_NOISE + APU_CONTROL_OFFSET, APU_NOISE_VOLUME_MUSIC);
+                apu_write(APU_NOISE + APU_TIMER_LOW_OFFSET, MUSIC_NOISE_SHORT_PERIOD);
+                apu_write(APU_NOISE + APU_TIMER_HIGH_OFFSET, APU_NOISE_LENGTH_SHORT);
             } else {
-                uint8_t length_index = (uint8_t)(((byte & 1) << 2) |
-                                                 ((byte >> 6) & 3));
-                length_index = (uint8_t)(length_index + a.note_table +
-                                         a.note_adder);
-                wr(NOISE, 0x10);
-                wr(NOISE + 2, byte);
-                wr(NOISE + 3, length_index);
+                uint8_t length_index =
+                    (uint8_t)(((stream_byte & 1) << 2) | ((stream_byte >> 6) & 3));
+                length_index = (uint8_t)(length_index + audio_state.note_length_table_offset +
+                                         audio_state.note_length_table_adder);
+                apu_write(APU_NOISE + APU_CONTROL_OFFSET, APU_NOISE_VOLUME_GENERIC);
+                apu_write(APU_NOISE + APU_TIMER_LOW_OFFSET, stream_byte);
+                apu_write(APU_NOISE + APU_TIMER_HIGH_OFFSET, length_index);
             }
         }
     }
 }
 
-static void pause_sound(void) {
-    uint8_t tone;
-    if (!a.pause_buf) {
+static void handle_pause_sound(void) {
+    uint8_t frequency_index;
+
+    if (!audio_state.pause_buffer) {
         if (!g_PauseSoundQueue)
             return;
-        a.pause_buf = g_PauseSoundQueue;
-        a.pause_mode = g_PauseSoundQueue;
-        wr(STATUS, 0);
-        a.sq1_buf = a.sq2_buf = a.noise_buf = 0;
-        wr(STATUS, 0x0f);
-        a.sq1_sfx_len = 0x2a;
+        audio_state.pause_buffer = g_PauseSoundQueue;
+        audio_state.pause_mode_flag = g_PauseSoundQueue;
+        apu_write(APU_STATUS, 0);
+        audio_state.square1_buffer = audio_state.square2_buffer = audio_state.noise_buffer = 0;
+        apu_write(APU_STATUS, APU_STATUS_ENABLE_CHANNELS);
+        audio_state.square1_sfx_length_counter = PAUSE_SOUND_LENGTH;
     }
-    tone = (a.sq1_sfx_len == 0x24 || a.sq1_sfx_len == 0x18) ? 0x64 : 0x44;
-    if (a.sq1_sfx_len == 0x2a || a.sq1_sfx_len == 0x24 ||
-        a.sq1_sfx_len == 0x1e || a.sq1_sfx_len == 0x18)
-        play_sq1(0x84, 0x7f, tone);
-    if (a.sq1_sfx_len && --a.sq1_sfx_len == 0) {
-        wr(STATUS, 0);
-        if (a.pause_buf == 2)
-            a.pause_mode = 0;
-        a.pause_buf = 0;
+
+    frequency_index = (audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_LATE ||
+                       audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_EARLY)
+                          ? PAUSE_SECOND_TONE_NOTE_INDEX
+                          : PAUSE_FIRST_TONE_NOTE_INDEX;
+    if (audio_state.square1_sfx_length_counter == PAUSE_SOUND_LENGTH ||
+        audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_LATE ||
+        audio_state.square1_sfx_length_counter == PAUSE_FIRST_TONE_REPEAT ||
+        audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_EARLY)
+        play_square1(APU_PAUSE_VOLUME, APU_SQUARE_SWEEP_DEFAULT, frequency_index);
+
+    if (audio_state.square1_sfx_length_counter && --audio_state.square1_sfx_length_counter == 0) {
+        apu_write(APU_STATUS, 0);
+        if (audio_state.pause_buffer == 2)
+            audio_state.pause_mode_flag = 0;
+        audio_state.pause_buffer = 0;
     }
 }
 
 void Audio_SoundEngine(void) {
-    uint8_t old_dac = a.dac_counter;
+    uint8_t old_dac = audio_state.dac_counter;
+
     if (g_OperMode == TITLE_SCREEN_MODE) {
-        wr(STATUS, 0);
+        apu_write(APU_STATUS, 0);
         return;
     }
-    wr(FRAME, 0xff);
-    wr(STATUS, 0x0f);
-    if (a.pause_mode || g_PauseSoundQueue == 1) {
-        pause_sound();
+    apu_write(APU_FRAME_COUNTER, APU_FRAME_COUNTER_RELOAD);
+    apu_write(APU_STATUS, APU_STATUS_ENABLE_CHANNELS);
+    if (audio_state.pause_mode_flag || g_PauseSoundQueue == 1) {
+        handle_pause_sound();
     } else {
-        square1_sfx();
-        square2_sfx();
-        noise_sfx();
-        music_handler();
+        handle_square1_sfx();
+        handle_square2_sfx();
+        handle_noise_sfx();
+        handle_music();
         g_AreaMusicQueue = 0;
         g_EventMusicQueue = 0;
     }
-    g_Square1SoundQueue = g_Square2SoundQueue = g_NoiseSoundQueue =
-        g_PauseSoundQueue = 0;
-    if (a.area_buf & 3) {
-        if (a.dac_counter < 0x30)
-            ++a.dac_counter;
-    } else if (a.dac_counter) {
-        --a.dac_counter;
+    g_Square1SoundQueue = g_Square2SoundQueue = g_NoiseSoundQueue = g_PauseSoundQueue = 0;
+    if (audio_state.area_music_buffer & MUSIC_DAC_AREA_MASK) {
+        if (audio_state.dac_counter < DAC_COUNTER_LIMIT)
+            ++audio_state.dac_counter;
+    } else if (audio_state.dac_counter) {
+        --audio_state.dac_counter;
     }
-    wr(DAC + 1, old_dac);
+    apu_write(APU_DMC + APU_DMC_OUTPUT_OFFSET, old_dac);
 }
 
-void Audio_GetVerifierState(AudioVerifierState *s) {
-    memset(s, 0, sizeof(*s));
-    s->note_table_offset = a.note_table;
-    s->square1_buffer = a.sq1_buf; s->square2_buffer = a.sq2_buf;
-    s->noise_buffer = a.noise_buf; s->area_buffer = a.area_buf;
-    s->music_data_low = a.music_data_lo; s->music_data_high = a.music_data_hi;
-    s->music_offset_square2 = a.off_sq2; s->music_offset_square1 = a.off_sq1;
-    s->music_offset_triangle = a.off_tri;
-    s->pause_queue = g_PauseSoundQueue; s->area_music_queue = g_AreaMusicQueue;
-    s->event_music_queue = g_EventMusicQueue; s->noise_queue = g_NoiseSoundQueue;
-    s->square2_queue = g_Square2SoundQueue; s->square1_queue = g_Square1SoundQueue;
-    s->music_offset_noise = a.off_noise; s->event_music_buffer = g_EventMusicBuffer;
-    s->pause_buffer = a.pause_buf;
-    s->square2_note_length_buffer = a.sq2_len_buf;
-    s->square2_note_length_counter = a.sq2_len; s->square2_envelope = a.sq2_env;
-    s->square1_note_length_counter = a.sq1_len; s->square1_envelope = a.sq1_env;
-    s->triangle_note_length_buffer = a.tri_len_buf;
-    s->triangle_note_length_counter = a.tri_len;
-    s->noise_beat_length_counter = a.noise_len;
-    s->square1_sfx_length_counter = a.sq1_sfx_len;
-    s->square2_sfx_length_counter = a.sq2_sfx_len;
-    s->sfx_secondary_counter = a.secondary;
-    s->noise_sfx_length_counter = a.noise_sfx_len; s->dac_counter = a.dac_counter;
-    s->noise_loopback_offset = a.noise_loop;
-    s->note_length_table_adder = a.note_adder;
-    s->area_music_buffer_alt = a.area_alt; s->pause_mode_flag = a.pause_mode;
-    s->ground_music_header_offset = a.ground_header;
-    s->alternate_register_content_flag = a.alt_reg;
+void Audio_GetVerifierState(AudioVerifierState *state) {
+    memset(state, 0, sizeof(*state));
+    state->note_table_offset = audio_state.note_length_table_offset;
+    state->square1_buffer = audio_state.square1_buffer;
+    state->square2_buffer = audio_state.square2_buffer;
+    state->noise_buffer = audio_state.noise_buffer;
+    state->area_buffer = audio_state.area_music_buffer;
+    state->music_data_low = audio_state.music_data_low;
+    state->music_data_high = audio_state.music_data_high;
+    state->music_offset_square2 = audio_state.music_offset_square2;
+    state->music_offset_square1 = audio_state.music_offset_square1;
+    state->music_offset_triangle = audio_state.music_offset_triangle;
+    state->pause_queue = g_PauseSoundQueue;
+    state->area_music_queue = g_AreaMusicQueue;
+    state->event_music_queue = g_EventMusicQueue;
+    state->noise_queue = g_NoiseSoundQueue;
+    state->square2_queue = g_Square2SoundQueue;
+    state->square1_queue = g_Square1SoundQueue;
+    state->music_offset_noise = audio_state.music_offset_noise;
+    state->event_music_buffer = g_EventMusicBuffer;
+    state->pause_buffer = audio_state.pause_buffer;
+    state->square2_note_length_buffer = audio_state.square2_note_length_buffer;
+    state->square2_note_length_counter = audio_state.square2_note_length_counter;
+    state->square2_envelope = audio_state.square2_envelope;
+    state->square1_note_length_counter = audio_state.square1_note_length_counter;
+    state->square1_envelope = audio_state.square1_envelope;
+    state->triangle_note_length_buffer = audio_state.triangle_note_length_buffer;
+    state->triangle_note_length_counter = audio_state.triangle_note_length_counter;
+    state->noise_beat_length_counter = audio_state.noise_beat_length_counter;
+    state->square1_sfx_length_counter = audio_state.square1_sfx_length_counter;
+    state->square2_sfx_length_counter = audio_state.square2_sfx_length_counter;
+    state->sfx_secondary_counter = audio_state.sfx_secondary_counter;
+    state->noise_sfx_length_counter = audio_state.noise_sfx_length_counter;
+    state->dac_counter = audio_state.dac_counter;
+    state->noise_loopback_offset = audio_state.noise_loopback_offset;
+    state->note_length_table_adder = audio_state.note_length_table_adder;
+    state->area_music_buffer_alt = audio_state.area_music_buffer_alt;
+    state->pause_mode_flag = audio_state.pause_mode_flag;
+    state->ground_music_header_offset = audio_state.ground_music_header_offset;
+    state->alternate_register_content_flag = audio_state.alternate_register_content_flag;
 }

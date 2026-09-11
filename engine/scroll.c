@@ -149,7 +149,10 @@ void Scroll_DrainOne(void) {
         s_TaskPhase++;
         uint8_t step = s_TaskPhase;
         if (step != 1 && step != 2 && step != 5 && step != 6) {
-            if (step >= 7) { s_TaskPhase = 0; s_PendingCols = 0; }
+            if (step >= 7) {
+                s_TaskPhase = 0;
+                s_PendingCols = 0;
+            }
             return;
         }
         uint16_t mt = s_PendingColIds[0];

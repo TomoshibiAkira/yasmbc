@@ -232,20 +232,30 @@ static void mask_y(uint8_t *sprite_data, uint16_t sprite_index) {
 void SprObject_MaskEnemyOAM(uint8_t *sprite_data, uint16_t base,
                             uint8_t bits) {
     uint8_t row, col;
-    if (bits & 0x04) for (row = 0; row < 3; row++) mask_y(sprite_data,
-        base + row * 2 + 1);
-    if (bits & 0x08) for (row = 0; row < 3; row++) mask_y(sprite_data,
-        base + row * 2);
-    if (bits & 0x20) for (col = 0; col < 2; col++) mask_y(sprite_data,
-        base + 4 + col);
+    if (bits & 0x04) {
+        for (row = 0; row < 3; row++)
+            mask_y(sprite_data, base + row * 2 + 1);
+    }
+    if (bits & 0x08) {
+        for (row = 0; row < 3; row++)
+            mask_y(sprite_data, base + row * 2);
+    }
+    if (bits & 0x20) {
+        for (col = 0; col < 2; col++)
+            mask_y(sprite_data, base + 4 + col);
+    }
     /* SprObjectOffscrChk (main.asm:11360-11403) sends each vertical-row bit
      * through MoveESprRowOffscreen at offsets $10/$08/$00; MoveESprRowOffscreen
      * (main.asm:11417-11422) always jumps to DumpTwoSpr (main.asm:10629-10647),
      * so d5/d6/d7 mask exactly the third/second/first two-sprite row. */
-    if (bits & 0x40) for (col = 0; col < 2; col++) mask_y(sprite_data,
-        base + 2 + col);
-    if (bits & 0x80) for (col = 0; col < 2; col++) mask_y(sprite_data,
-        base + col);
+    if (bits & 0x40) {
+        for (col = 0; col < 2; col++)
+            mask_y(sprite_data, base + 2 + col);
+    }
+    if (bits & 0x80) {
+        for (col = 0; col < 2; col++)
+            mask_y(sprite_data, base + col);
+    }
 }
 
 void SprObject_MaskPlayerOAM(uint8_t *sprite_data, uint16_t base,

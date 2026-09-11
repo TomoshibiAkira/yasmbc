@@ -211,10 +211,14 @@ void Collision_GetVerifierState(CollisionVerifierState *out) {
     for (i = 0; i < BLOCK_SLOT_COUNT; ++i) {
         const BlockObjectState *b = &s_BlockObjects[i];
         unsigned j = i + BLOCK_SLOT_COUNT;
-        out->block_state[i] = b->state; out->block_page[i] = b->page;
-        out->block_x[i] = b->x; out->block_y_high[i] = b->y_high;
-        out->block_y[i] = b->y; out->block_x_speed[i] = b->x_speed;
-        out->block_y_speed[i] = b->y_speed; out->block_y_force[i] = b->y_move_force;
+        out->block_state[i] = b->state;
+        out->block_page[i] = b->page;
+        out->block_x[i] = b->x;
+        out->block_y_high[i] = b->y_high;
+        out->block_y[i] = b->y;
+        out->block_x_speed[i] = b->x_speed;
+        out->block_y_speed[i] = b->y_speed;
+        out->block_y_force[i] = b->y_move_force;
         /* BlockObjectsCore's UpdSte writes only Block_State,x, where x is
          * the original ObjectOffset.  SpawnBrickChunks uses +2 for the
          * lower chunk's parallel fields but never writes Block_State+2;
@@ -237,10 +241,14 @@ void Collision_GetVerifierState(CollisionVerifierState *out) {
     out->block_residual_counter = g_BlockResidualCounter;
     for (i = 0; i < MISC_RAW_SLOT_COUNT; ++i) {
         const MiscHammerState *h = &s_Hammers[i];
-        out->misc_state[i] = h->state; out->misc_page[i] = h->page;
-        out->misc_x[i] = h->x; out->misc_y_high[i] = h->y_high;
-        out->misc_y[i] = h->y; out->misc_x_speed[i] = h->x_speed;
-        out->misc_y_speed[i] = h->y_speed; out->misc_bbox_ctrl[i] = h->bbox_ctrl;
+        out->misc_state[i] = h->state;
+        out->misc_page[i] = h->page;
+        out->misc_x[i] = h->x;
+        out->misc_y_high[i] = h->y_high;
+        out->misc_y[i] = h->y;
+        out->misc_x_speed[i] = h->x_speed;
+        out->misc_y_speed[i] = h->y_speed;
+        out->misc_bbox_ctrl[i] = h->bbox_ctrl;
         out->hammer_source[i] = h->source_slot;
         out->misc_collision[i] = h->collision_flag;
         if (i >= 5 && s_CoinActive[i - 5] && h->state == 0) {
@@ -248,7 +256,8 @@ void Collision_GetVerifierState(CollisionVerifierState *out) {
             out->misc_state[i] = s_CoinState[c];
             out->misc_page[i] = (uint8_t)(s_CoinWorldX[c] >> 8);
             out->misc_x[i] = (uint8_t)s_CoinWorldX[c];
-            out->misc_y_high[i] = s_CoinYHigh[c]; out->misc_y[i] = s_CoinY[c];
+            out->misc_y_high[i] = s_CoinYHigh[c];
+            out->misc_y[i] = s_CoinY[c];
             out->misc_y_speed[i] = s_CoinSpeed[c];
         }
     }
@@ -926,15 +935,25 @@ static void draw_brick_chunks(uint8_t slot, BlockObjectState *block) {
     /* DrawBrickChunks owns one four-sprite OAM record: top chunk, its
      * companion, bottom chunk, its companion. */
     o = &g_SpriteData[sprite_base + 0];
-    o[0] = block->rel_y; o[1] = tile; o[2] = attributes; o[3] = block->rel_x;
+    o[0] = block->rel_y;
+    o[1] = tile;
+    o[2] = attributes;
+    o[3] = block->rel_x;
     o = &g_SpriteData[sprite_base + 4];
-    o[0] = block->rel_y; o[1] = tile; o[2] = attributes; o[3] = top_right;
+    o[0] = block->rel_y;
+    o[1] = tile;
+    o[2] = attributes;
+    o[3] = top_right;
     o = &g_SpriteData[sprite_base + 8];
-    o[0] = block->lower_chunk.rel_y; o[1] = tile;
-    o[2] = attributes; o[3] = block->lower_chunk.rel_x;
+    o[0] = block->lower_chunk.rel_y;
+    o[1] = tile;
+    o[2] = attributes;
+    o[3] = block->lower_chunk.rel_x;
     o = &g_SpriteData[sprite_base + 12];
-    o[0] = block->lower_chunk.rel_y; o[1] = tile;
-    o[2] = attributes; o[3] = bottom_right;
+    o[0] = block->lower_chunk.rel_y;
+    o[1] = tile;
+    o[2] = attributes;
+    o[3] = bottom_right;
 
     /* DrawBrickChunks calls ChkLeftCo, not DrawBlock's two-column mask:
      * the ROM tests only bit $08 here, so a right-column ($04) edge does
