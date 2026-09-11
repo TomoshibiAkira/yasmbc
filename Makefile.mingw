@@ -1,0 +1,153 @@
+# Makefile for MinGW-w64 (Windows cross-compilation from Linux)
+# Usage: x86_64-w64-mingw32-gcc (or i686-w64-mingw32-gcc for 32-bit)
+
+# ========================================================================
+# COMPILER SETTINGS
+# ========================================================================
+
+# MinGW-w64 compiler (set CROSS prefix if needed)
+CROSS ?= x86_64-w64-mingw32-
+CC = $(CROSS)gcc
+WINDRES = $(CROSS)windres
+
+# ========================================================================
+# SDL2 FOR WINDOWS (from pcx钱了- SDL2 mingw packages)
+# ========================================================================
+
+# SDL2 include and library paths (adjust if different)
+ifeq ($(CROSS),i686-w64-mingw32-)
+MINGW_ARCH ?= x86
+SDL2_PREFIX ?= /usr/i686-w64-mingw32
+else
+MINGW_ARCH ?= x64
+SDL2_PREFIX ?= /usr/x86_64-w64-mingw32
+endif
+SDL2_INCLUDE = $(SDL2_PREFIX)/include
+SDL2_LIB = $(SDL2_PREFIX)/lib
+
+# Alternative: use pkg-config for MinGW
+# SDL2_CFLAGS := $(shell $(CROSS)pkg-config --cflags sdl2 2>/dev/null)
+# SDL2_LIBS := $(shell $(CROSS)pkg-config --libs sdl2 2>/dev/null)
+
+# ========================================================================
+# COMPILER FLAGS
+# ========================================================================
+
+# Windows-specific flags
+WIN_CFLAGS = -DWIN32 -D_WINDOWS
+
+# SDL2 flags
+SDL_CFLAGS = -I$(SDL2_INCLUDE)
+
+# Standard warning flags
+WFLAGS = -Wall -Wextra -Wpedantic
+
+# Debug build: symbols, no optimization, debug features enabled
+INCLUDES = -I. -Iengine
+DEBUG_CFLAGS = $(WIN_CFLAGS) $(SDL_CFLAGS) $(WFLAGS) $(INCLUDES) -g -O0
+
+# Release build: optimized, debug features disabled
+RELEASE_CFLAGS = $(WIN_CFLAGS) $(SDL_CFLAGS) $(WFLAGS) $(INCLUDES) -O2 -DNDEBUG
+
+# ========================================================================
+# LINKER FLAGS
+# ========================================================================
+
+# SDL2 libraries for MinGW
+# Order matters: mingw32 first, then SDL2main, then SDL2
+LDFLAGS_SDL = -L$(SDL2_LIB)
+LDLIBS = -lmingw32 -lSDL2main -lSDL2 -lm -ldinput8 -ldxguid -ldxerr8 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lshell32 -lversion -luuid -lcomctl32 -lhid -lsetupapi
+
+# Static linking (optional, uncomment to enable)
+# LDFLAGS_STATIC = -static -static-libgcc -static-libstdc++
+# LDLIBS_STATIC = -Wl,-Bstatic -lmingw32 -lSDL2main -lSDL2 -lm -ldinput8 -ldxguid -ldxerr8 -luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lshell32 -lversion -luuid -lcomctl32 -Wl,--push-state,--as-needed -lm -lstdc++ -lgcc -lc
+# LDLIBS_STATIC += -Wl,--pop-state
+
+# ========================================================================
+# OUTPUT
+# ========================================================================
+
+TARGET = smb2-$(MINGW_ARCH).exe
+TARGET_RELEASE = smb2-release-$(MINGW_ARCH).exe
+TARGET_STRIP = $(TARGET:.exe=_stripped.exe)
+
+# ========================================================================
+# SOURCE FILES
+# ========================================================================
+
+# System (platform layer)
+SYSTEM_C = system/sdl/platform_sdl.c system/common/ppu_memory.c system/sdl/video_soft.c system/vram_flush.c
+
+# Engine
+ENGINE_C = engine/nmi.c engine/audio.c engine/assets.c engine/timers.c engine/title-menu.c engine/victory.c engine/sprite-offsets.c engine/spr-object.c engine/score.c engine/misc.c engine/enemy/enemy-data.c engine/enemy/enemy.c engine/enemy/enemy-slot.c engine/enemy/enemy-spawn.c engine/enemy/enemy-move.c engine/enemy/enemy-collide.c engine/enemy/enemy-draw.c engine/enemy/enemy-run.c engine/opermode.c engine/game-mode/core.c engine/scroll.c engine/player/player.c engine/player/player-physics.c engine/player/player-sprite.c engine/collision.c engine/level/level.c engine/level/level-load.c engine/level/level-vram.c engine/level/level-column.c engine/level/level-objects.c engine/screen/screen.c engine/screen/routine/colors.c engine/screen/routine/hud.c engine/screen/routine/init.c engine/screen/routine/intermediate.c engine/screen/routine/title.c engine/screen/routine/area_parser.c constants/globals.c
+APU_CXX = system/sdl/apu_sdl.cpp third_party/nes_snd_emu/nes_apu/Blip_Buffer.cpp third_party/nes_snd_emu/nes_apu/Multi_Buffer.cpp third_party/nes_snd_emu/nes_apu/Nes_Apu.cpp third_party/nes_snd_emu/nes_apu/Nes_Oscs.cpp third_party/nes_snd_emu/nes_apu/Nonlinear_Buffer.cpp
+MINGW_APU_DIR ?= build/mingw-$(MINGW_ARCH)-apu
+APU_OBJECTS = $(patsubst %.cpp,$(MINGW_APU_DIR)/%.o,$(APU_CXX))
+
+# Main
+MAIN_C = main.c
+
+# All C source files
+C_SOURCES = $(MAIN_C) $(SYSTEM_C) $(ENGINE_C) system/fm2.c system/state_stream.c
+
+# ========================================================================
+# BUILD RULES
+# ========================================================================
+
+.PHONY: all debug release clean strip help install
+
+# Default: debug build
+all: debug
+
+# Debug build: no NDEBUG → debug features enabled
+debug: $(TARGET)
+	@echo "MinGW debug build complete: $(TARGET)"
+
+# Release build: NDEBUG defined → no debug features, optimized
+release: $(TARGET_RELEASE)
+	@echo "MinGW release build complete: $(TARGET_RELEASE)"
+
+# Debug executable
+$(TARGET): $(C_SOURCES) $(APU_OBJECTS)
+	$(CC) $(DEBUG_CFLAGS) $(LDFLAGS_SDL) -o $@ $^ $(LDLIBS) -lstdc++
+
+# Release executable
+$(TARGET_RELEASE): $(C_SOURCES) $(APU_OBJECTS)
+	$(CC) $(RELEASE_CFLAGS) $(LDFLAGS_SDL) -o $@ $^ $(LDLIBS) -lstdc++
+
+$(MINGW_APU_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CROSS)g++ -std=c++11 -O2 -include climits $(SDL_CFLAGS) -c $< -o $@
+
+# Strip symbols for smaller file
+strip: $(TARGET)
+	$(CROSS)strip -s $< -o $(TARGET_STRIP)
+	@echo "Stripped executable: $(TARGET_STRIP)"
+
+# Clean
+clean:
+	rm -f $(TARGET) $(TARGET_RELEASE) $(TARGET_STRIP) *.o engine/*.o engine/*/*.o engine/*/*/*.o system/*.o system/*/*.o constants/*.o
+	rm -rf build/mingw-apu build/mingw-x64-apu build/mingw-x86-apu
+
+# Help
+help:
+	@echo "MinGW-w64 Cross-Compilation Makefile"
+	@echo ""
+	@echo "Prerequisites (on Linux):"
+	@echo "  apt install mingw-w64"
+	@echo "  # Install SDL2 for MinGW:"
+	@echo "  apt install libsdl2-mingw-w64-dev"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all      - Build debug (default)"
+	@echo "  debug    - Build debug (-g -O0, debug features enabled)"
+	@echo "  release  - Build release (-O2 -DNDEBUG)"
+	@echo "  strip    - Strip symbols from executable"
+	@echo "  clean    - Remove build files"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make -f Makefile.mingw"
+	@echo "  make -f Makefile.mingw release"
+	@echo "  CROSS=i686-w64-mingw32- make -f Makefile.mingw  # x86"
+	@echo ""
+	@echo "Output: $(TARGET)"

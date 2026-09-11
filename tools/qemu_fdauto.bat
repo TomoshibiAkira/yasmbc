@@ -1,0 +1,6 @@
+@echo off
+SET DOSDIR=A:\FREEDOS
+SET PATH=%DOSDIR%\BIN;A:\
+A:
+BENCH.EXE --frames 60 --no-audio
+FDAPM POWEROFF
