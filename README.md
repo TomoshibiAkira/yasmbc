@@ -19,7 +19,7 @@ a good starting point.
 - GNU Make
 - Python 3 (asset extraction only)
 - SDL2 development files (for Linux/SDL build)
-- SDL 1.2 development files plus a Win98-capable x86 compiler (for legacy Windows build)
+- An i586 MinGW-compatible x86 compiler (for the native Win95 build)
 - DJGPP (for DOS VGA build)
 - MinGW (for Windows build)
 
@@ -45,7 +45,7 @@ Use a Super Mario Bros. (W) [!] iNES dump whose SHA-1 is
 make extract ROM=/path/to/Super\ Mario\ Bros.\ \(W\)\ \[\!\].nes
 ```
 
-`make sdl`, `make sdl-release`, and `make sdl12-release` run extraction
+`make sdl`, `make sdl-release`, and `make win95-release` run extraction
 automatically when `assets/` is missing, using `ROM=` or the `SMB_ROM`
 environment variable.
 
@@ -65,7 +65,7 @@ make sdl-release
 |--------|--------|--------|
 | `make` / `make sdl` | `smb2` | Debug (`-g -O0`). Headless extras enabled. |
 | `make sdl-release` | `smb2-release` | Optimized. This is the build meant for playing. |
-| `make sdl12-release` | `smb2-sdl12-release-x86.exe` | SDL 1.2 Win98 x86 frontend with APU audio. |
+| `make win95-release` | `smb2-win95-x86.exe` | Native Win32/GDI + WinMM Win9x frontend; no SDL dependency. |
 | `make extract` | `assets/` | ROM required; see above. |
 | `make clean` | | Removes objects and binaries, keeps `assets/`. |
 
@@ -210,35 +210,25 @@ Those are complete-configuration measurements, not a processor scaling curve.
 See the DOS platform document for hardware-reporting requirements and the
 benchmark comparison caveat.
 
-## SDL 1.2 / Windows 98 compatibility build
+## Native Win32 / Windows 95 frontend
 
-The optional `sdl12` target builds the x86-only frontend using the SDL 1.2
-surface API. It shares the game and software compositor with SDL2 and avoids
-SDL2's texture/renderer API, making it suitable for a Win98-compatible
-toolchain and SDL 1.2 `SDL.dll`:
+The `win95` target is the preferred dependency-free legacy Windows build. It
+uses GDI for the indexed framebuffer, WinMM `waveOut` for audio, and
+`GetAsyncKeyState` for independent multi-key input. Build it with an i586
+MinGW-compatible compiler:
 
 ```bash
-make sdl12-release \
-  SDL12_CC=/opt/mingw32/bin/i386-pc-mingw32-gcc \
-  SDL12_CXX=/opt/mingw32/bin/i386-pc-mingw32-g++ \
-  SDL12_PREFIX=/opt/SDL-1.2.15/mingw32
+make win95-release \
+  WIN95_CC=/opt/mingw32/bin/i586-mingw32msvc-gcc \
+  WIN95_CXX=/opt/mingw32/bin/i586-mingw32msvc-g++ \
+  WIN95_OBJDUMP=/opt/mingw32/bin/i586-mingw32msvc-objdump
 ```
 
-This produces `smb2-sdl12-release-x86.exe`. Copy it with the matching 32-bit
-`SDL.dll` and `assets/`. `SMB_SDL12_SCALE=1..4` controls integer scaling and
-`SMB_SDL12_FULLSCREEN=1` requests fullscreen. Audio uses the shared
-Nes_Snd_Emu core through an SDL1.2 callback and a prebuffered ring; the default
-linear mixer leaves more CPU headroom on period machines, while
-`SMB_SDL12_AUDIO_HIFI=1` enables the more expensive nonlinear mixer.
-The release uses PII instructions and LTO (`SDL12_LTO=0` disables LTO for old
-toolchains).
-
-Legacy Win98 performance also depends strongly on the PCI display adapter and
-its driver. In the tested Pentium II configuration, an S3 ViRGE could not
-sustain the presentation path, while replacing it with an ATI Mach64 allowed
-the same build and CPU to run at full speed. CPU clock alone is therefore not
-a useful minimum-system predictor. Details and the toolchain caveats are in
-[docs/sdl12.md](docs/sdl12.md).
+This produces `smb2-win95-x86.exe`; copy it with `assets/` and no SDL runtime.
+`SMB_WIN95_SCALE=1..4` controls integer scaling. Set
+`SMB_WIN95_AUDIO_RATE=44100` for 44.1 kHz output; the default is 22.05 kHz.
+The four-buffer native WaveOut queue is tuned for Win95/K6-class systems. See
+[docs/win95.md](docs/win95.md) for the API, queue, and compatibility details.
 
 ## ANSI terminal frontend
 
@@ -266,9 +256,9 @@ Space clears held directions.
 
 ```
 engine/           translated game (NMI, player, level, enemies, audio, …)
-system/common/    host-side PPU memory shared by SDL, SDL 1.2, and DOS
+system/common/    host-side PPU memory shared by SDL, Win95, DOS, and terminal
 system/sdl/       SDL video and audio host
-system/sdl12/     SDL 1.2 Win98-compatible video/input/audio host
+system/win95/     Native Win9x GDI/WinMM video/input/audio host (no SDL)
 system/dos/       Mode X, Sound Blaster, and DOS benchmark host
 system/           platform-neutral interfaces, FM2, state streams
 constants/        shared types and RAM-named globals

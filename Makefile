@@ -1,5 +1,5 @@
 # Makefile for Super Mario Bros. Reimplementation
-# Builds the supported host frontends: SDL2, SDL 1.2/Win98, DOS, and terminal.
+# Builds the supported host frontends: SDL2, native Win9x, DOS, and terminal.
 
 # ========================================================================
 # PATHS
@@ -69,7 +69,7 @@ ASSETS_STAMP = $(ASSET_DIR)/.extracted
 # BUILD RULES
 # ========================================================================
 
-.PHONY: all sdl sdl-debug sdl-release sdl12 sdl12-debug sdl12-release mingw mingw-debug mingw-release mingw64 mingw64-debug mingw64-release mingw32 mingw32-debug mingw32-release dos dos-bench dos-floppy terminal clean extract test help
+.PHONY: all sdl sdl-debug sdl-release win95 win95-debug win95-release win95-audit mingw mingw-debug mingw-release mingw64 mingw64-debug mingw64-release mingw32 mingw32-debug mingw32-release dos dos-bench dos-floppy terminal clean extract test help
 
 # Default: build debug
 all: sdl
@@ -125,62 +125,68 @@ build/apu/%.o: %.cpp
 	g++ -std=c++11 -O2 -Wall -Wextra -include climits $(SDL_CFLAGS) -c $< -o $@
 
 # ========================================================================
-# SDL 1.2 / Windows 98 x86 compatibility frontend
+# Native Win32 / Win9x x86 frontend (no SDL dependency)
 #
-# The game and software compositor are shared with the SDL2 build.  This
-# target uses a small SDL 1.2 callback adapter around the same Nes_Snd_Emu
-# core as SDL2.  Override SDL12_CC, SDL12_CXX, and SDL12_PREFIX with a
-# Win9x-capable toolchain and the matching SDL 1.2 developer package.
+# It uses GDI, GetAsyncKeyState, timeGetTime, and a direct WinMM waveOut
+# queue.  The frontend is the supported legacy Windows target.
 # ========================================================================
 
-# Win98 is a 32-bit target; there is intentionally no SDL1.2 x64 variant.
-SDL12_CC ?= i686-w64-mingw32-gcc
-SDL12_CXX ?= i686-w64-mingw32-g++
-SDL12_PREFIX ?= /usr/i686-w64-mingw32
-SDL12_CFLAGS ?= -I$(SDL12_PREFIX)/include
-SDL12_LDFLAGS ?= -L$(SDL12_PREFIX)/lib
-SDL12_LIBS ?= -lmingw32 -lSDLmain -lSDL -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic -static-libgcc -lm -mwindows
-SDL12_TARGET = smb2-sdl12-x86.exe
-SDL12_RELEASE_TARGET = smb2-sdl12-release-x86.exe
-SDL12_SYSTEM_C = system/sdl12/platform_sdl12.c system/sdl12/win98_gthr_compat.c system/common/ppu_memory.c system/sdl/video_soft.c system/vram_flush.c
-SDL12_C_SOURCES = $(MAIN_C) $(SDL12_SYSTEM_C) $(ENGINE_C) system/fm2.c system/state_stream.c
-SDL12_APU_CXX = system/sdl12/apu_sdl12.cpp third_party/nes_snd_emu/nes_apu/Blip_Buffer.cpp third_party/nes_snd_emu/nes_apu/Multi_Buffer.cpp third_party/nes_snd_emu/nes_apu/Nes_Apu.cpp third_party/nes_snd_emu/nes_apu/Nes_Oscs.cpp third_party/nes_snd_emu/nes_apu/Nonlinear_Buffer.cpp
-SDL12_DEBUG_CFLAGS = -std=gnu99 -g -O0 -DSDL12 $(WARNFLAGS) $(SDL12_CFLAGS) $(INCLUDES)
-# The shipped target is a Pentium II-class Win98 machine.  `-march` matters
-# here: `-mtune` alone keeps the generic i686 instruction set and leaves the
-# PII's MMX/CMOV scheduling opportunities unused.  LTO is enabled by default
-# for the release, but can be disabled for older MinGW toolchains with
-# `SDL12_LTO=0`.
-SDL12_LTO ?= 1
-SDL12_ARCH_FLAGS = -march=pentium2 -mtune=pentium2 -fomit-frame-pointer
-ifeq ($(SDL12_LTO),1)
-SDL12_LTO_FLAGS = -flto
-else
-SDL12_LTO_FLAGS =
-endif
-SDL12_APU_DIR = build/sdl12-apu-$(SDL12_LTO)
-SDL12_APU_OBJECTS = $(patsubst %.cpp,$(SDL12_APU_DIR)/%.o,$(SDL12_APU_CXX))
-SDL12_RELEASE_CFLAGS = -std=gnu99 -O3 -DNDEBUG -DSDL12 $(SDL12_ARCH_FLAGS) $(SDL12_LTO_FLAGS) $(WARNFLAGS) $(SDL12_CFLAGS) $(INCLUDES)
-SDL12_CXXFLAGS = -std=c++11 -O3 -DNDEBUG -fno-exceptions -fno-rtti $(SDL12_ARCH_FLAGS) $(SDL12_LTO_FLAGS) $(WARNFLAGS) -include climits $(SDL12_CFLAGS) $(INCLUDES)
+WIN95_CC ?= i586-mingw32msvc-gcc
+WIN95_CXX ?= i586-mingw32msvc-g++
+WIN95_OBJDUMP ?= $(patsubst %gcc,%objdump,$(WIN95_CC))
+WIN95_TARGET = smb2-win95-x86.exe
+WIN95_DEBUG_TARGET = smb2-win95-debug-x86.exe
+WIN95_CFLAGS ?= -std=gnu99 -O3 -DNDEBUG -DWIN95 -march=pentium -mtune=pentium -fomit-frame-pointer $(WARNFLAGS) $(INCLUDES)
+WIN95_DEBUG_CFLAGS ?= -std=gnu99 -g -O0 -DWIN95 -march=pentium -mtune=pentium $(WARNFLAGS) $(INCLUDES)
+WIN95_CXXFLAGS ?= -std=c++0x -O3 -DNDEBUG -DWIN95 -march=pentium -mtune=pentium -fomit-frame-pointer -fno-exceptions -fno-rtti $(WARNFLAGS) -include climits $(INCLUDES)
+WIN95_DEBUG_CXXFLAGS ?= -std=c++0x -g -O0 -DWIN95 -march=pentium -mtune=pentium -fno-exceptions -fno-rtti $(WARNFLAGS) -include climits $(INCLUDES)
+WIN95_LDFLAGS ?= -Wl,-Bstatic -static-libgcc -Wl,-Bdynamic -mwindows
+WIN95_LIBS ?= -luser32 -lgdi32 -lwinmm -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic -lm
+WIN95_SYSTEM_C = system/win95/platform_win95.c system/common/ppu_memory.c system/sdl/video_soft.c system/vram_flush.c
+WIN95_C_SOURCES = $(MAIN_C) $(WIN95_SYSTEM_C) $(ENGINE_C) system/fm2.c system/state_stream.c
+WIN95_APU_CXX = system/win95/apu_win95.cpp third_party/nes_snd_emu/nes_apu/Blip_Buffer.cpp third_party/nes_snd_emu/nes_apu/Multi_Buffer.cpp third_party/nes_snd_emu/nes_apu/Nes_Apu.cpp third_party/nes_snd_emu/nes_apu/Nes_Oscs.cpp third_party/nes_snd_emu/nes_apu/Nonlinear_Buffer.cpp
+WIN95_APU_DIR = build/win95-apu
+WIN95_APU_OBJECTS = $(patsubst %.cpp,$(WIN95_APU_DIR)/%.o,$(WIN95_APU_CXX))
+WIN95_DEBUG_APU_DIR = build/win95-debug-apu
+WIN95_DEBUG_APU_OBJECTS = $(patsubst %.cpp,$(WIN95_DEBUG_APU_DIR)/%.o,$(WIN95_APU_CXX))
 
-sdl12: sdl12-release
-	@true
+win95: win95-release
 
-sdl12-debug: $(ASSETS_STAMP) $(SDL12_TARGET)
-	@echo "SDL 1.2 debug build complete: $(SDL12_TARGET)"
+win95-debug: $(ASSETS_STAMP) $(WIN95_DEBUG_TARGET)
+	@echo "Native Win32 debug build complete: $(WIN95_DEBUG_TARGET)"
 
-sdl12-release: $(ASSETS_STAMP) $(SDL12_RELEASE_TARGET)
-	@echo "SDL 1.2 release build complete: $(SDL12_RELEASE_TARGET)"
+win95-release: $(ASSETS_STAMP) $(WIN95_TARGET)
+	@$(MAKE) --no-print-directory win95-audit
+	@echo "Native Win32 Win9x build complete: $(WIN95_TARGET)"
 
-$(SDL12_TARGET): $(ASSETS_STAMP) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS)
-	$(SDL12_CC) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS) $(SDL12_DEBUG_CFLAGS) $(SDL12_LDFLAGS) $(SDL12_LIBS) -o $@
+.PHONY: win95-audit
+win95-audit:
+	@echo "Auditing native Win32 frontend for Pentium/i586 and Win9x compatibility"
+	@test -f $(WIN95_TARGET) || { echo "error: missing $(WIN95_TARGET)" >&2; exit 1; }
+	@command -v "$(WIN95_OBJDUMP)" >/dev/null 2>&1 || { echo "error: WIN95_OBJDUMP not found: $(WIN95_OBJDUMP)" >&2; exit 1; }
+	@if $(WIN95_OBJDUMP) -d $(WIN95_TARGET) | grep -Eiq '\bcmov[a-z]*\b|%xmm[0-7]\b|%mm[0-7]\b|\b(emms|femms|movdqa|movdqu|movaps|movups|padd[bwdq]|psub[bwdq]|pmulhw|pmullw)\b'; then \
+		echo "error: $(WIN95_TARGET) contains post-i586 instructions" >&2; exit 1; \
+	fi
+	@if $(WIN95_OBJDUMP) -p $(WIN95_TARGET) | grep -Eiq '[[:space:]](GetThreadId|TryEnterCriticalSection|InitializeCriticalSectionEx)[[:space:]]*$$'; then \
+		echo "error: $(WIN95_TARGET) imports APIs unavailable on Windows 9x" >&2; exit 1; \
+	fi
+	@if $(WIN95_OBJDUMP) -p $(WIN95_TARGET) | grep -Eiq '[[:space:]]SDL(_main)?\.dll[[:space:]]*$$'; then \
+		echo "error: native Win32 target unexpectedly imports SDL" >&2; exit 1; \
+	fi
 
-$(SDL12_RELEASE_TARGET): $(ASSETS_STAMP) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS)
-	$(SDL12_CC) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS) $(SDL12_RELEASE_CFLAGS) $(SDL12_LDFLAGS) $(SDL12_LIBS) -o $@
+$(WIN95_TARGET): $(ASSETS_STAMP) $(WIN95_C_SOURCES) $(WIN95_APU_OBJECTS)
+	$(WIN95_CC) $(WIN95_C_SOURCES) $(WIN95_APU_OBJECTS) $(WIN95_CFLAGS) $(WIN95_LDFLAGS) $(WIN95_LIBS) -o $@
 
-$(SDL12_APU_DIR)/%.o: %.cpp Makefile
+$(WIN95_DEBUG_TARGET): $(ASSETS_STAMP) $(WIN95_C_SOURCES) $(WIN95_DEBUG_APU_OBJECTS)
+	$(WIN95_CC) $(WIN95_C_SOURCES) $(WIN95_DEBUG_APU_OBJECTS) $(WIN95_DEBUG_CFLAGS) $(WIN95_LDFLAGS) $(WIN95_LIBS) -o $@
+
+$(WIN95_APU_DIR)/%.o: %.cpp Makefile
 	@mkdir -p $(dir $@)
-	$(SDL12_CXX) $(SDL12_CXXFLAGS) -c $< -o $@
+	$(WIN95_CXX) $(WIN95_CXXFLAGS) -c $< -o $@
+
+$(WIN95_DEBUG_APU_DIR)/%.o: %.cpp Makefile
+	@mkdir -p $(dir $@)
+	$(WIN95_CXX) $(WIN95_DEBUG_CXXFLAGS) -c $< -o $@
 
 # Extract assets from a user-supplied canonical SMB1 iNES dump
 $(ASSETS_STAMP): $(EXTRACT_TOOL)
@@ -344,8 +350,8 @@ $(DOS_DIR)/CWSDPMI.EXE: $(CWSDPMI_EXE)
 
 # Clean build files (preserves assets)
 clean:
-	rm -f $(SDL_TARGET) $(SDL_RELEASE_TARGET) $(SDL12_TARGET) $(SDL12_RELEASE_TARGET) *.o engine/*.o engine/*/*.o engine/*/*/*.o system/*.o system/*/*.o constants/*.o smb2
-	rm -rf build/apu build/sdl12-apu* build/dos build/dos-apu $(DOS_DIR)
+	rm -f $(SDL_TARGET) $(SDL_RELEASE_TARGET) $(WIN95_TARGET) $(WIN95_DEBUG_TARGET) *.o engine/*.o engine/*/*.o engine/*/*/*.o system/*.o system/*/*.o constants/*.o smb2
+	rm -rf build/apu build/win95-apu build/win95-debug-apu build/dos build/dos-apu $(DOS_DIR)
 
 # Test SDL build (debug)
 test: sdl-debug
@@ -360,9 +366,9 @@ help:
 	@echo "  sdl          - Build SDL debug version"
 	@echo "  sdl-debug    - Build SDL debug (-g -O0, headless mode enabled)"
 	@echo "  sdl-release  - Build SDL release (-O2 -DNDEBUG)"
-	@echo "  sdl12        - Build SDL 1.2 Win98-compatible x86 release with audio"
-	@echo "  sdl12-debug  - Build SDL 1.2 x86 debug version"
-	@echo "  sdl12-release - Build SDL 1.2 x86 release version"
+	@echo "  win95        - Native Win32/Win9x x86 build (no SDL dependency)"
+	@echo "  win95-debug  - Native Win32 x86 debug build"
+	@echo "  win95-release - Native Win32/Win9x x86 release build"
 	@echo "  dos          - DJGPP DOS VGA build (dosdist/SMB2.EXE)"
 	@echo "  dos-floppy   - 1.44M FAT12 image (dosdist/SMB2.IMG)"
 	@echo "  terminal     - ANSI true-color terminal build (30 FPS display, no audio)"
@@ -377,5 +383,5 @@ help:
 	@echo ""
 	@echo "Requirements:"
 	@echo "  SDL:    libsdl2-dev"
-	@echo "  SDL1.2: Win9x-capable x86 compiler and SDL 1.2 developer package"
+	@echo "  Win95:  i586 MinGW compiler (no SDL package required)"
 	@echo "  DOS:    DJGPP at \$$HOME/djgpp (override DJGPP_PREFIX=)"

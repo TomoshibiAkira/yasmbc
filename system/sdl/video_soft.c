@@ -48,8 +48,9 @@ static uint8_t *opaque_dest;
 static uint32_t dirty_mask[VIDEO_HEIGHT];
 static uint32_t bg_serial = 1;
 static uint16_t world_cam;
-#ifdef SDL12
-/* SDL1.2 has no texture upload stage: retain the background in host memory
+#ifdef WIN95
+/* The native GDI indexed frontend has no texture upload stage: retain the
+ * background in host memory
  * and only translate the exposed strip when the camera moves.  Sprites are
  * still composited into frame_index_buffer every frame, so their lifetime and
  * priority remain unchanged. */
@@ -142,7 +143,7 @@ static void refresh_palette_luts(void)
 }
 #endif
 
-#if defined(DOS) || defined(SDL12)
+#if defined(DOS) || defined(WIN95)
 static void set_draw_target(uint8_t *color, uint8_t *opaque)
 {
     color_dest = color;
@@ -150,7 +151,7 @@ static void set_draw_target(uint8_t *color, uint8_t *opaque)
 }
 #endif
 
-#ifdef SDL12
+#ifdef WIN95
 static void video_clear_target(uint8_t *color, uint8_t *opaque);
 
 static int cached_scroll_delta(void)
@@ -248,7 +249,7 @@ static void cache_background_dirty(uint32_t nametable_generation,
     }
 }
 
-static void compose_sdl12_background(void)
+static void compose_cached_background(void)
 {
     int delta;
     uint32_t nametable_generation = PPU_GetNametableGeneration();
@@ -303,7 +304,7 @@ int video_init(void)
     }
     memset(frame_index_buffer, 0, sizeof(frame_index_buffer));
     memset(bg_opaque_mask, 0, sizeof(bg_opaque_mask));
-#ifdef SDL12
+#ifdef WIN95
     memset(cached_bg_indices, 0, sizeof(cached_bg_indices));
     memset(cached_bg_opaque, 0, sizeof(cached_bg_opaque));
     cached_bg_valid = 0;
@@ -673,8 +674,8 @@ void video_render_begin(void)
     dos_vga_flush_tiles();
 #else
     refresh_palette_cache();
-#ifdef SDL12
-    compose_sdl12_background();
+#ifdef WIN95
+    compose_cached_background();
 #else
     video_clear_target(frame_index_buffer, bg_opaque_mask);
     if (g_RenderEnabledLatch) {

@@ -11,12 +11,12 @@ gameplay queues
     -> Audio_SoundEngine (ASM translation)
     -> platform_apu_write(address, value)
        -> SDL: Nes_Snd_Emu 2A03 renderer -> SDL queued mono PCM
+       -> Win95: Nes_Snd_Emu 2A03 renderer -> WinMM waveOut ring PCM
        -> DOS: Nes_Snd_Emu 2A03 renderer -> Sound Blaster DMA ring
-       -> SDL 1.2/Win98: Nes_Snd_Emu -> SDL 1.2 callback/ring PCM
 ```
 
 The gameplay code does not generate PCM, emulate CPU instructions, or depend on
-a host. SDL and DOS backends do not understand SMB songs or effects. This keeps the
+a host. Host backends do not understand SMB songs or effects. This keeps the
 portable game logic at the APU-register boundary while allowing each host
 backend to choose its own synthesis, output format, and buffering policy.
 
@@ -30,7 +30,7 @@ mode, and register-write order. Music bytes are loaded from
 `audio/music.asm` data region: music headers/streams and lookup/envelope
 tables. The interrupt vectors at `$fffa–$ffff` are intentionally excluded.
 
-The SDL renderer is Shay Green's Nes_Snd_Emu 0.1.7 at upstream commit
+The host renderers use Shay Green's Nes_Snd_Emu 0.1.7 at upstream commit
 `3badd244a0dd62a9f1b7fc2a0a6cac35c4491f83`, vendored under
 `third_party/nes_snd_emu`. Its LGPL-2.1 license and provenance are retained.
 The old core assumes a 32-bit `long` when its default buffer length is used;
@@ -93,15 +93,15 @@ The ANSI terminal backend is intentionally silent.
 `make sdl` builds the C game, the C++ APU adapter, and the vendored core. Normal
 interactive SDL runs open an audio device; headless runs advance the APU and
 can emit deterministic traces without opening one. `make -f Makefile.mingw`
-uses the same sources for the SDL2 Windows build. `make sdl12-release` selects
-the x86 SDL 1.2/Win98 adapter. It uses the same APU core at 22,050 Hz and feeds
-a callback ring; its default linear mono mixer leaves more deadline headroom,
-and `SMB_SDL12_AUDIO_HIFI=1` restores nonlinear mixing for listening
-comparisons. Period-hardware testing found the PCI video presentation path,
-not APU synthesis, to be the decisive full-speed bottleneck in the tested
-configuration. Headless runs still avoid opening an audio device. The
-NES/FCEUX side remains the external reference used to specify and verify the
-translated game; this tree does not produce a NES ROM.
+uses the same sources for the SDL2 Windows build. The native Win95 frontend
+uses WinMM `waveOut` with a four-buffer queue at 22,050 Hz by default; set
+`SMB_WIN95_AUDIO_RATE=44100` for 44,100 Hz. Its default linear mono mixer
+leaves more CPU headroom, and `SMB_WIN95_AUDIO_HIFI=1` restores nonlinear
+mixing for listening comparisons. Period-hardware testing found the PCI video
+presentation path, not APU synthesis, to be the decisive full-speed bottleneck
+in the tested configuration. Headless runs still avoid opening an audio
+device. The NES/FCEUX side remains the external reference used to specify and
+verify the translated game; this tree does not produce a NES ROM.
 
 Current limitations:
 

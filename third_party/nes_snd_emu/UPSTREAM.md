@@ -5,7 +5,7 @@ This directory contains the core files required from
 `3badd244a0dd62a9f1b7fc2a0a6cac35c4491f83`.
 
 Copyright (C) 2003-2005 Shay Green. Licensed under LGPL-2.1; see `LICENSE`
-and `LGPL.txt`. The project uses the library in the SDL2, SDL 1.2/Win98, and
+and `LGPL.txt`. The project uses the library in the SDL2, native Win95, and
 DOS audio backends. Each backend owns its PCM buffering and device interface;
 the shared game engine supplies the same APU register stream.
 
