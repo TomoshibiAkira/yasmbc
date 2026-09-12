@@ -12,13 +12,13 @@ gameplay queues
     -> platform_apu_write(address, value)
        -> SDL: Nes_Snd_Emu 2A03 renderer -> SDL queued mono PCM
        -> DOS: Nes_Snd_Emu 2A03 renderer -> Sound Blaster DMA ring
-       -> NES: direct $4000-$4017 register write
+       -> SDL 1.2/Win98: Nes_Snd_Emu -> SDL 1.2 callback/ring PCM
 ```
 
 The gameplay code does not generate PCM, emulate CPU instructions, or depend on
 a host. SDL and DOS backends do not understand SMB songs or effects. This keeps the
-portable game logic at the APU-register boundary and allows the NES backend to
-reuse the same translated driver.
+portable game logic at the APU-register boundary while allowing each host
+backend to choose its own synthesis, output format, and buffering policy.
 
 ## Source of truth
 
@@ -37,7 +37,7 @@ The old core assumes a 32-bit `long` when its default buffer length is used;
 `system/sdl/apu_sdl.cpp` therefore requests an explicit 100 ms buffer on 64-bit
 hosts.
 
-SDL output is NTSC (`1,789,773` CPU clocks), 48 kHz, signed 16-bit mono, using
+SDL2 output is NTSC (`1,789,773` CPU clocks), 48 kHz, signed 16-bit mono, using
 the core's nonlinear pulse/TND mixer. Each video frame advances 29,780 or
 29,781 clocks alternately. Since the C translation has no CPU instruction
 clock, writes within an NMI use monotonically increasing four-cycle timestamps;
@@ -93,8 +93,15 @@ The ANSI terminal backend is intentionally silent.
 `make sdl` builds the C game, the C++ APU adapter, and the vendored core. Normal
 interactive SDL runs open an audio device; headless runs advance the APU and
 can emit deterministic traces without opening one. `make -f Makefile.mingw`
-uses the same sources for Windows. The NES backend writes registers directly;
-NES ROM build health remains a separate project constraint.
+uses the same sources for the SDL2 Windows build. `make sdl12-release` selects
+the x86 SDL 1.2/Win98 adapter. It uses the same APU core at 22,050 Hz and feeds
+a callback ring; its default linear mono mixer leaves more deadline headroom,
+and `SMB_SDL12_AUDIO_HIFI=1` restores nonlinear mixing for listening
+comparisons. Period-hardware testing found the PCI video presentation path,
+not APU synthesis, to be the decisive full-speed bottleneck in the tested
+configuration. Headless runs still avoid opening an audio device. The
+NES/FCEUX side remains the external reference used to specify and verify the
+translated game; this tree does not produce a NES ROM.
 
 Current limitations:
 

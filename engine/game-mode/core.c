@@ -42,7 +42,7 @@ static void Sub_PlayerEndLevel(void);
 /* PlayerHole (player-control.asm:78-121) is the post-collision consumer of
  * Player_Y_HighPos.  Its flag in X distinguishes a cloud exit (zero) from a
  * death/life-loss transition (one).  EventMusicBuffer remains an explicit
- * audio-owned RAM input; the SDL audio layer does not synthesize or drain it. */
+ * audio-owned RAM input; Audio_SoundEngine consumes it at the NMI boundary. */
 static void Player_Hole(void) {
     uint8_t death = 0;
     uint8_t threshold = 0x04;
@@ -83,8 +83,8 @@ static void Player_Hole(void) {
         return;
     }
 
-    /* The APU consumer is stubbed, so EventMusicBuffer is normally zero;
-     * retain the original wait gate for any future queue producer. */
+    /* EventMusicBuffer is consumed by Audio_SoundEngine at the same NMI
+     * boundary as the original driver; retain the original wait gate. */
     if (g_EventMusicBuffer != 0) return;
     g_GameEngineSubroutine = 0x06; /* PlayerLoseLife next frame */
 }
@@ -445,7 +445,7 @@ static void Sub_PlayerDeath(void) {
 }
 
 /* PlayerFireFlower/ResetPalFireFlower (player-fire-flower.asm:2-25).
- * Sound queue and APU playback are intentionally excluded. */
+ * Sound queue writes remain in the translated SoundEngine path. */
 static void Sub_PlayerFireFlower(void) {
     uint8_t palette_bits;
 
@@ -551,7 +551,7 @@ void GameMode_ContinueGame(void) {
  * decision; the SDL aliases still commit the active seven-byte player record
  * before that test, just as the NES RAM does. */
 void GameMode_TerminateGame(void) {
-    g_EventMusicQueue = Silence; /* queue state only; APU playback excluded */
+    g_EventMusicQueue = Silence; /* consumed by Audio_SoundEngine */
     if (GameMode_TransposePlayers()) {
         GameMode_ContinueGame();
         return;

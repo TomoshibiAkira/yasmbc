@@ -25,9 +25,6 @@ extern uint8_t g_ScreenRoutineTask;
 /* VRAM buffer control */
 extern uint8_t g_VRAM_Buffer_AddrCtrl;
 
-/* NMI frame counter */
-extern uint8_t g_NmiFrameCounter;
-
 /* Frame counter */
 extern uint16_t g_FrameCounter;
 

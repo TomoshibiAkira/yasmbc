@@ -164,9 +164,3 @@ void NMI_Tick(uint8_t raw_input0, uint8_t raw_input1) {
     if ((g_GamePauseStatus & 0x01) == 0) OperMode_Tasks();
 
 }
-
-#ifdef NES
-void nmi_handler(void) {
-    g_NmiFrameCounter++;
-}
-#endif

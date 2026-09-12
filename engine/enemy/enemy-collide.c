@@ -207,9 +207,9 @@ void enemy_process_direction(EnemySlot *e) {
         if (desired_direction != e->moving_dir) {
             enemy_landing(e);
         } else {
-            /* ChkForBump_HammerBroJ queues the bump SFX for a d7 object
-             * (audio playback is excluded), then uses the Hammer Bro jump
-             * path only for Enemy_ID=$05.  All other supported callers use
+            /* ChkForBump_HammerBroJ queues the bump SFX for a d7 object;
+             * Audio_SoundEngine consumes it after gameplay.  The Hammer Bro
+             * jump path is only for Enemy_ID=$05.  All other supported callers use
              * RXSpd, whose object-owned fields are shared here. */
             if (e->id == HammerBro) {
                 e->y_speed = 0xfa;
@@ -843,8 +843,8 @@ uint8_t Enemy_CheckHammerCollision(uint8_t bbox_ul_x, uint8_t bbox_ul_y,
 }
 
 /* InjurePlayer is intentionally kept behind its existing InjuryTimer guard.
- * The hammer path only requests this gameplay transition; the original
- * sound queue is still state-only because SDL/APU playback is excluded. */
+ * The hammer path only requests this gameplay transition; Audio_SoundEngine
+ * consumes the corresponding queue on the same NMI. */
 void Enemy_HammerInjury(void) {
     injure_player();
 }

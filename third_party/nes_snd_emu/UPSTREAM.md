@@ -5,8 +5,9 @@ This directory contains the core files required from
 `3badd244a0dd62a9f1b7fc2a0a6cac35c4491f83`.
 
 Copyright (C) 2003-2005 Shay Green. Licensed under LGPL-2.1; see `LICENSE`
-and `LGPL.txt`. The SMB2 project uses the library only in the SDL host build.
-The NES backend writes the hardware APU registers directly.
+and `LGPL.txt`. The project uses the library in the SDL2, SDL 1.2/Win98, and
+DOS audio backends. Each backend owns its PCM buffering and device interface;
+the shared game engine supplies the same APU register stream.
 
 Local portability change: `nes_apu/blargg_common.h` replaces Boost's
 fixed-width integer aliases and static-assert macro with their C++11 standard

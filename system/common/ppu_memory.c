@@ -34,6 +34,12 @@ static uint16_t scroll_x = 0;
 static uint32_t render_generation;
 static uint32_t nametable_generation;
 static uint8_t tile_dirty[2][32 * 30];
+typedef struct {
+    uint8_t nt;
+    uint8_t col;
+    uint8_t row;
+} PPU_DirtyTile;
+static PPU_DirtyTile dirty_tiles[2 * 32 * 30];
 static int tiles_dirty_count;
 static uint8_t palette_dirty;
 
@@ -45,6 +51,9 @@ static void mark_tile_dirty(uint8_t nt, int col, int row)
     idx = (uint16_t)row * 32 + (uint16_t)col;
     if (!tile_dirty[nt][idx]) {
         tile_dirty[nt][idx] = 1;
+        dirty_tiles[tiles_dirty_count].nt = nt;
+        dirty_tiles[tiles_dirty_count].col = (uint8_t)col;
+        dirty_tiles[tiles_dirty_count].row = (uint8_t)row;
         ++tiles_dirty_count;
     }
 }
@@ -72,6 +81,7 @@ void PPU_Init(void) {
     memset(palette, 0, sizeof(palette));
     memset(palette_readback, 0, sizeof(palette_readback));
     memset(tile_dirty, 0, sizeof(tile_dirty));
+    memset(dirty_tiles, 0, sizeof(dirty_tiles));
     tiles_dirty_count = 0;
     palette_dirty = 0x0F;
     render_generation = 1;
@@ -274,54 +284,48 @@ void PPU_RenderNametable(uint8_t nt_primary)
 
 void PPU_RedrawDirtyTiles(uint8_t nt_primary)
 {
-    uint8_t nt;
-    int row, col;
+    int dirty_index;
 
     if (tiles_dirty_count <= 0)
         return;
 
-    for (nt = 0; nt < 2; nt++) {
-        for (row = 0; row < 30; row++) {
-            for (col = 0; col < 32; col++) {
-                uint16_t idx = (uint16_t)row * 32 + (uint16_t)col;
-                int screen_x, screen_y;
-                uint16_t base, attr_base;
-                uint8_t tile, attr_byte;
-                int attr_col, attr_row, shift, palette_idx;
-                int hud = (row < 4 && g_RenderSprite0Split);
+    for (dirty_index = 0; dirty_index < tiles_dirty_count; ++dirty_index) {
+        uint8_t nt = dirty_tiles[dirty_index].nt;
+        int col = dirty_tiles[dirty_index].col;
+        int row = dirty_tiles[dirty_index].row;
+        int screen_x, screen_y;
+        uint16_t base, attr_base;
+        uint8_t tile, attr_byte;
+        int attr_col, attr_row, shift, palette_idx;
+        int hud = (row < 4 && g_RenderSprite0Split);
 
-                if (!tile_dirty[nt][idx])
-                    continue;
-                tile_dirty[nt][idx] = 0;
-
-                if (hud) {
-                    if (nt != 0)
-                        continue;
-                    screen_x = col * 8;
-                    screen_y = row * 8;
-                    base = 0x0000;
-                } else {
-                    int primary = (nt == (nt_primary & 1));
-                    int world_x = (primary ? 0 : 256) + col * 8;
-                    screen_x = world_x - (int)(scroll_x & 0xFF);
-                    screen_y = row * 8;
-                    base = nt * 0x0400;
-                }
-                if (screen_x <= -8 || screen_x >= 256)
-                    continue;
-
-                attr_base = base + 0x03C0;
-                tile = vram[base + row * 32 + col];
-                attr_col = col / 4;
-                attr_row = row / 4;
-                attr_byte = vram[attr_base + attr_row * 8 + attr_col];
-                shift = ((row & 2) << 1) | (col & 2);
-                palette_idx = (attr_byte >> shift) & 0x03;
-                platform_draw_tile_at(tile, (uint8_t)palette_idx,
-                                      screen_x, screen_y);
-            }
+        if (hud) {
+            if (nt != 0)
+                continue;
+            screen_x = col * 8;
+            screen_y = row * 8;
+            base = 0x0000;
+        } else {
+            int primary = (nt == (nt_primary & 1));
+            int world_x = (primary ? 0 : 256) + col * 8;
+            screen_x = world_x - (int)(scroll_x & 0xFF);
+            screen_y = row * 8;
+            base = nt * 0x0400;
         }
+        if (screen_x <= -8 || screen_x >= 256)
+            continue;
+
+        attr_base = base + 0x03C0;
+        tile = vram[base + row * 32 + col];
+        attr_col = col / 4;
+        attr_row = row / 4;
+        attr_byte = vram[attr_base + attr_row * 8 + attr_col];
+        shift = ((row & 2) << 1) | (col & 2);
+        palette_idx = (attr_byte >> shift) & 0x03;
+        platform_draw_tile_at(tile, (uint8_t)palette_idx,
+                              screen_x, screen_y);
     }
+    memset(tile_dirty, 0, sizeof(tile_dirty));
     tiles_dirty_count = 0;
 }
 

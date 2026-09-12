@@ -1,12 +1,10 @@
 # Makefile for Super Mario Bros. Reimplementation
-# Builds for both NES (CC65) and SDL/PC
+# Builds the supported host frontends: SDL2, SDL 1.2/Win98, DOS, and terminal.
 
 # ========================================================================
 # PATHS
 # ========================================================================
 
-CC65_DIR = ../../cc65
-CC65_BIN = $(CC65_DIR)/bin
 SDL_CFLAGS = $(shell sdl2-config --cflags 2>/dev/null || echo "-I/usr/include/SDL2")
 SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null || echo "-lSDL2")
 
@@ -14,25 +12,8 @@ SDL_LIBS = $(shell sdl2-config --libs 2>/dev/null || echo "-lSDL2")
 # OUTPUT FILES
 # ========================================================================
 
-NES_TARGET = smb2.nes
 SDL_TARGET = smb2
 SDL_RELEASE_TARGET = smb2-release
-
-# ========================================================================
-# CC65 (NES) COMPILER SETTINGS
-# ========================================================================
-
-CC65 = $(CC65_BIN)/cc65
-CA65 = $(CC65_BIN)/ca65
-LD65 = $(CC65_BIN)/ld65
-
-# NES-specific flags
-NES_CFLAGS = -t sim6502 -O -I. -Iengine
-NES_ASMFLAGS = -t sim6502
-NES_LDFLAGS = -t sim6502
-
-# NES linker config
-NES_CFG = system/nes/nes.cfg
 
 # ========================================================================
 # SDL (PC) COMPILER SETTINGS
@@ -52,10 +33,6 @@ RELEASE_CFLAGS = -O2 -DNDEBUG $(WARNFLAGS) $(SDL_CFLAGS) $(INCLUDES)
 # SOURCE FILES
 # ========================================================================
 
-# Constants (assembly and C)
-CONSTANT_ASM = 
-CONSTANT_C = constants/types.h constants/defs.h constants/hardware.h
-
 # System (platform layer)
 SYSTEM_ASM = 
 SYSTEM_C = system/sdl/platform_sdl.c system/common/ppu_memory.c system/sdl/video_soft.c system/vram_flush.c
@@ -71,19 +48,6 @@ MAIN_C = main.c
 
 # All C source files
 C_SOURCES = $(MAIN_C) $(SYSTEM_C) $(ENGINE_C) system/fm2.c system/state_stream.c
-
-# ========================================================================
-# ASSEMBLY SOURCE FILES (for future use)
-# ========================================================================
-
-ASM_SOURCES = 
-
-# ========================================================================
-# OBJECT FILES
-# ========================================================================
-
-NES_OBJECTS = $(C_SOURCES:.c=.o) $(ASM_SOURCES:.asm=.o)
-SDL_OBJECTS = $(C_SOURCES:.c=.o)
 
 # ========================================================================
 # ASSET EXTRACTION
@@ -105,7 +69,7 @@ ASSETS_STAMP = $(ASSET_DIR)/.extracted
 # BUILD RULES
 # ========================================================================
 
-.PHONY: all sdl sdl-debug sdl-release nes mingw mingw-debug mingw-release mingw64 mingw64-debug mingw64-release mingw32 mingw32-debug mingw32-release dos dos-bench dos-floppy terminal clean extract test help
+.PHONY: all sdl sdl-debug sdl-release sdl12 sdl12-debug sdl12-release mingw mingw-debug mingw-release mingw64 mingw64-debug mingw64-release mingw32 mingw32-debug mingw32-release dos dos-bench dos-floppy terminal clean extract test help
 
 # Default: build debug
 all: sdl
@@ -160,20 +124,63 @@ build/apu/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	g++ -std=c++11 -O2 -Wall -Wextra -include climits $(SDL_CFLAGS) -c $< -o $@
 
-# Build NES ROM
-nes: $(NES_TARGET)
-	@echo "NES build complete: $(NES_TARGET)"
+# ========================================================================
+# SDL 1.2 / Windows 98 x86 compatibility frontend
+#
+# The game and software compositor are shared with the SDL2 build.  This
+# target uses a small SDL 1.2 callback adapter around the same Nes_Snd_Emu
+# core as SDL2.  Override SDL12_CC, SDL12_CXX, and SDL12_PREFIX with a
+# Win9x-capable toolchain and the matching SDL 1.2 developer package.
+# ========================================================================
 
-$(NES_TARGET): $(NES_OBJECTS)
-	$(LD65) $(NES_LDFLAGS) -Ln 0x200-0x5FF -Config $(NES_CFG) -o $@ $(NES_OBJECTS)
+# Win98 is a 32-bit target; there is intentionally no SDL1.2 x64 variant.
+SDL12_CC ?= i686-w64-mingw32-gcc
+SDL12_CXX ?= i686-w64-mingw32-g++
+SDL12_PREFIX ?= /usr/i686-w64-mingw32
+SDL12_CFLAGS ?= -I$(SDL12_PREFIX)/include
+SDL12_LDFLAGS ?= -L$(SDL12_PREFIX)/lib
+SDL12_LIBS ?= -lmingw32 -lSDLmain -lSDL -Wl,-Bstatic -lstdc++ -Wl,-Bdynamic -static-libgcc -lm -mwindows
+SDL12_TARGET = smb2-sdl12-x86.exe
+SDL12_RELEASE_TARGET = smb2-sdl12-release-x86.exe
+SDL12_SYSTEM_C = system/sdl12/platform_sdl12.c system/sdl12/win98_gthr_compat.c system/common/ppu_memory.c system/sdl/video_soft.c system/vram_flush.c
+SDL12_C_SOURCES = $(MAIN_C) $(SDL12_SYSTEM_C) $(ENGINE_C) system/fm2.c system/state_stream.c
+SDL12_APU_CXX = system/sdl12/apu_sdl12.cpp third_party/nes_snd_emu/nes_apu/Blip_Buffer.cpp third_party/nes_snd_emu/nes_apu/Multi_Buffer.cpp third_party/nes_snd_emu/nes_apu/Nes_Apu.cpp third_party/nes_snd_emu/nes_apu/Nes_Oscs.cpp third_party/nes_snd_emu/nes_apu/Nonlinear_Buffer.cpp
+SDL12_DEBUG_CFLAGS = -std=gnu99 -g -O0 -DSDL12 $(WARNFLAGS) $(SDL12_CFLAGS) $(INCLUDES)
+# The shipped target is a Pentium II-class Win98 machine.  `-march` matters
+# here: `-mtune` alone keeps the generic i686 instruction set and leaves the
+# PII's MMX/CMOV scheduling opportunities unused.  LTO is enabled by default
+# for the release, but can be disabled for older MinGW toolchains with
+# `SDL12_LTO=0`.
+SDL12_LTO ?= 1
+SDL12_ARCH_FLAGS = -march=pentium2 -mtune=pentium2 -fomit-frame-pointer
+ifeq ($(SDL12_LTO),1)
+SDL12_LTO_FLAGS = -flto
+else
+SDL12_LTO_FLAGS =
+endif
+SDL12_APU_DIR = build/sdl12-apu-$(SDL12_LTO)
+SDL12_APU_OBJECTS = $(patsubst %.cpp,$(SDL12_APU_DIR)/%.o,$(SDL12_APU_CXX))
+SDL12_RELEASE_CFLAGS = -std=gnu99 -O3 -DNDEBUG -DSDL12 $(SDL12_ARCH_FLAGS) $(SDL12_LTO_FLAGS) $(WARNFLAGS) $(SDL12_CFLAGS) $(INCLUDES)
+SDL12_CXXFLAGS = -std=c++11 -O3 -DNDEBUG -fno-exceptions -fno-rtti $(SDL12_ARCH_FLAGS) $(SDL12_LTO_FLAGS) $(WARNFLAGS) -include climits $(SDL12_CFLAGS) $(INCLUDES)
 
-# Compile C files for NES
-%.o: %.c
-	$(CC65) $(NES_CFLAGS) -o $@ $<
+sdl12: sdl12-release
+	@true
 
-# Compile ASM files for NES
-%.o: %.asm
-	$(CA65) $(NES_ASMFLAGS) -o $@ $<
+sdl12-debug: $(ASSETS_STAMP) $(SDL12_TARGET)
+	@echo "SDL 1.2 debug build complete: $(SDL12_TARGET)"
+
+sdl12-release: $(ASSETS_STAMP) $(SDL12_RELEASE_TARGET)
+	@echo "SDL 1.2 release build complete: $(SDL12_RELEASE_TARGET)"
+
+$(SDL12_TARGET): $(ASSETS_STAMP) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS)
+	$(SDL12_CC) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS) $(SDL12_DEBUG_CFLAGS) $(SDL12_LDFLAGS) $(SDL12_LIBS) -o $@
+
+$(SDL12_RELEASE_TARGET): $(ASSETS_STAMP) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS)
+	$(SDL12_CC) $(SDL12_C_SOURCES) $(SDL12_APU_OBJECTS) $(SDL12_RELEASE_CFLAGS) $(SDL12_LDFLAGS) $(SDL12_LIBS) -o $@
+
+$(SDL12_APU_DIR)/%.o: %.cpp Makefile
+	@mkdir -p $(dir $@)
+	$(SDL12_CXX) $(SDL12_CXXFLAGS) -c $< -o $@
 
 # Extract assets from a user-supplied canonical SMB1 iNES dump
 $(ASSETS_STAMP): $(EXTRACT_TOOL)
@@ -337,8 +344,8 @@ $(DOS_DIR)/CWSDPMI.EXE: $(CWSDPMI_EXE)
 
 # Clean build files (preserves assets)
 clean:
-	rm -f $(NES_TARGET) $(SDL_TARGET) $(SDL_RELEASE_TARGET) *.o engine/*.o engine/*/*.o engine/*/*/*.o system/*.o system/*/*.o constants/*.o *.nes smb2
-	rm -rf build/apu build/dos build/dos-apu $(DOS_DIR)
+	rm -f $(SDL_TARGET) $(SDL_RELEASE_TARGET) $(SDL12_TARGET) $(SDL12_RELEASE_TARGET) *.o engine/*.o engine/*/*.o engine/*/*/*.o system/*.o system/*/*.o constants/*.o smb2
+	rm -rf build/apu build/sdl12-apu* build/dos build/dos-apu $(DOS_DIR)
 
 # Test SDL build (debug)
 test: sdl-debug
@@ -353,7 +360,9 @@ help:
 	@echo "  sdl          - Build SDL debug version"
 	@echo "  sdl-debug    - Build SDL debug (-g -O0, headless mode enabled)"
 	@echo "  sdl-release  - Build SDL release (-O2 -DNDEBUG)"
-	@echo "  nes          - Build NES ROM (requires CC65)"
+	@echo "  sdl12        - Build SDL 1.2 Win98-compatible x86 release with audio"
+	@echo "  sdl12-debug  - Build SDL 1.2 x86 debug version"
+	@echo "  sdl12-release - Build SDL 1.2 x86 release version"
 	@echo "  dos          - DJGPP DOS VGA build (dosdist/SMB2.EXE)"
 	@echo "  dos-floppy   - 1.44M FAT12 image (dosdist/SMB2.IMG)"
 	@echo "  terminal     - ANSI true-color terminal build (30 FPS display, no audio)"
@@ -368,4 +377,5 @@ help:
 	@echo ""
 	@echo "Requirements:"
 	@echo "  SDL:    libsdl2-dev"
+	@echo "  SDL1.2: Win9x-capable x86 compiler and SDL 1.2 developer package"
 	@echo "  DOS:    DJGPP at \$$HOME/djgpp (override DJGPP_PREFIX=)"

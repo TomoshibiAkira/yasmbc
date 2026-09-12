@@ -1,5 +1,6 @@
 /* defs.h - Game constants for SMB reimplementation */
-/* NOTE: For SDL build, use regular variables. For NES build, these are memory addresses. */
+/* Address-named constants document the original NES RAM layout; all supported
+ * frontends use regular C variables and host-side memory abstractions. */
 
 #ifndef SMB_DEFS_H
 #define SMB_DEFS_H

@@ -48,6 +48,19 @@ static uint8_t *opaque_dest;
 static uint32_t dirty_mask[VIDEO_HEIGHT];
 static uint32_t bg_serial = 1;
 static uint16_t world_cam;
+#ifdef SDL12
+/* SDL1.2 has no texture upload stage: retain the background in host memory
+ * and only translate the exposed strip when the camera moves.  Sprites are
+ * still composited into frame_index_buffer every frame, so their lifetime and
+ * priority remain unchanged. */
+static uint8_t cached_bg_indices[BG_MASK_SIZE];
+static uint8_t cached_bg_opaque[BG_MASK_SIZE];
+static uint8_t cached_bg_valid;
+static uint32_t cached_bg_nametable_generation;
+static uint8_t cached_bg_scroll;
+static uint8_t cached_bg_nt;
+static uint8_t cached_bg_split;
+#endif
 #ifdef DOS
 static uint8_t persistent_opaque[BG_MASK_SIZE];
 static uint8_t persistent_scroll;
@@ -83,10 +96,16 @@ static uint8_t palette_byte(uint8_t palette_idx, uint8_t color_idx)
 static void rebuild_rendered_palette(int palette_idx)
 {
     int tile, pixel;
+    int first_tile = palette_idx >= 4 ? 0 : TILES_PER_BANK;
+    int tile_count = TILES_PER_BANK;
     for (pixel = 0; pixel < 4; ++pixel)
         cached_expanded_palette[palette_idx][pixel] =
             palette_byte((uint8_t)palette_idx, (uint8_t)pixel);
-    for (tile = 0; tile < NUM_TILES; ++tile) {
+    /* The PPUCTRL configuration uses the upper CHR bank for backgrounds and
+     * the lower bank for sprites.  Do not rebuild the other half of the
+     * palette cache when ColorRotation changes one background palette; on a
+     * P6-class host this cache pass is a visible periodic spike. */
+    for (tile = first_tile; tile < first_tile + tile_count; ++tile) {
         const uint8_t *src = chr_texels + tile * 64;
         uint8_t *dst = rendered_tiles[palette_idx] + tile * 64;
         for (pixel = 0; pixel < 64; ++pixel)
@@ -123,11 +142,141 @@ static void refresh_palette_luts(void)
 }
 #endif
 
-#ifdef DOS
+#if defined(DOS) || defined(SDL12)
 static void set_draw_target(uint8_t *color, uint8_t *opaque)
 {
     color_dest = color;
     opaque_dest = opaque;
+}
+#endif
+
+#ifdef SDL12
+static void video_clear_target(uint8_t *color, uint8_t *opaque);
+
+static int cached_scroll_delta(void)
+{
+    int old_world = (int)cached_bg_nt * 256 + cached_bg_scroll;
+    int new_world = (int)g_RenderNT * 256 + g_RenderScrollX;
+    int delta = new_world - old_world;
+
+    /* The two nametables form a 512-pixel ring.  Camera movement during one
+     * frame is small; normalize only the wraparound, not arbitrary jumps. */
+    if (delta < -256)
+        delta += 512;
+    else if (delta > 256)
+        delta -= 512;
+    return delta;
+}
+
+static void cache_background_full(void)
+{
+    uint8_t backdrop = (uint8_t)(PPU_ReadPalette(0) & 0x3F);
+
+    memset(cached_bg_indices, backdrop, sizeof(cached_bg_indices));
+    memset(cached_bg_opaque, 0, sizeof(cached_bg_opaque));
+    set_draw_target(cached_bg_indices, cached_bg_opaque);
+    PPU_SetScroll(g_RenderScrollX, 0);
+    PPU_SetScroll(0, 0);
+    PPU_RenderNametable(g_RenderNT);
+    set_draw_target(frame_index_buffer, bg_opaque_mask);
+
+    cached_bg_nametable_generation = PPU_GetNametableGeneration();
+    cached_bg_scroll = g_RenderScrollX;
+    cached_bg_nt = g_RenderNT;
+    cached_bg_split = g_RenderSprite0Split;
+    cached_bg_valid = 1;
+}
+
+static void cache_background_shift(int delta)
+{
+    uint8_t backdrop = (uint8_t)(PPU_ReadPalette(0) & 0x3F);
+    int first_row = g_RenderSprite0Split ? 32 : 0;
+    int y;
+
+    if (delta > 0) {
+        for (y = first_row; y < VIDEO_HEIGHT; ++y) {
+            uint8_t *color = cached_bg_indices + y * VIDEO_WIDTH;
+            uint8_t *opaque = cached_bg_opaque + y * VIDEO_WIDTH;
+            memmove(color, color + delta, (size_t)(VIDEO_WIDTH - delta));
+            memset(color + VIDEO_WIDTH - delta, backdrop, (size_t)delta);
+            memmove(opaque, opaque + delta, (size_t)(VIDEO_WIDTH - delta));
+            memset(opaque + VIDEO_WIDTH - delta, 0, (size_t)delta);
+        }
+    } else if (delta < 0) {
+        int amount = -delta;
+        for (y = first_row; y < VIDEO_HEIGHT; ++y) {
+            uint8_t *color = cached_bg_indices + y * VIDEO_WIDTH;
+            uint8_t *opaque = cached_bg_opaque + y * VIDEO_WIDTH;
+            memmove(color + amount, color, (size_t)(VIDEO_WIDTH - amount));
+            memset(color, backdrop, (size_t)amount);
+            memmove(opaque + amount, opaque, (size_t)(VIDEO_WIDTH - amount));
+            memset(opaque, 0, (size_t)amount);
+        }
+    }
+
+    PPU_SetScroll(g_RenderScrollX, 0);
+    PPU_SetScroll(0, 0);
+    set_draw_target(cached_bg_indices, cached_bg_opaque);
+    if (delta > 0)
+        PPU_RenderNametableXRange(g_RenderNT, VIDEO_WIDTH - delta,
+                                  VIDEO_WIDTH - 1);
+    else if (delta < 0)
+        PPU_RenderNametableXRange(g_RenderNT, 0, -delta - 1);
+    set_draw_target(frame_index_buffer, bg_opaque_mask);
+
+    cached_bg_scroll = g_RenderScrollX;
+    cached_bg_nt = g_RenderNT;
+}
+
+static void cache_background_dirty(uint32_t nametable_generation,
+                                    uint8_t palette_dirty)
+{
+    /* The PPU keeps dirty bits at tile granularity.  Redrawing into the
+     * persistent cache is safe here: platform_draw_tile_at overwrites both
+     * the colour and opacity bytes, including transparent texels. */
+    if (nametable_generation != cached_bg_nametable_generation) {
+        set_draw_target(cached_bg_indices, cached_bg_opaque);
+        PPU_RedrawDirtyTiles(g_RenderNT);
+        set_draw_target(frame_index_buffer, bg_opaque_mask);
+        cached_bg_nametable_generation = nametable_generation;
+    }
+
+    if (palette_dirty) {
+        set_draw_target(cached_bg_indices, cached_bg_opaque);
+        PPU_RedrawTilesUsingPalettes(g_RenderNT, palette_dirty);
+        set_draw_target(frame_index_buffer, bg_opaque_mask);
+    }
+}
+
+static void compose_sdl12_background(void)
+{
+    int delta;
+    uint32_t nametable_generation = PPU_GetNametableGeneration();
+    uint8_t palette_dirty = PPU_TakePaletteDirty();
+
+    if (!g_RenderEnabledLatch) {
+        video_clear_target(frame_index_buffer, bg_opaque_mask);
+        cached_bg_valid = 0;
+        return;
+    }
+
+    if (!cached_bg_valid ||
+        cached_bg_nt != g_RenderNT || cached_bg_split != g_RenderSprite0Split) {
+        cache_background_full();
+    } else {
+        delta = cached_scroll_delta();
+        if (delta < -16 || delta > 16) {
+            cache_background_full();
+        } else if (delta != 0) {
+            cache_background_shift(delta);
+        }
+        if (cached_bg_valid)
+            cache_background_dirty(nametable_generation, palette_dirty);
+    }
+
+    memcpy(frame_index_buffer, cached_bg_indices, sizeof(frame_index_buffer));
+    memcpy(bg_opaque_mask, cached_bg_opaque, sizeof(bg_opaque_mask));
+    set_draw_target(frame_index_buffer, bg_opaque_mask);
 }
 #endif
 
@@ -154,6 +303,15 @@ int video_init(void)
     }
     memset(frame_index_buffer, 0, sizeof(frame_index_buffer));
     memset(bg_opaque_mask, 0, sizeof(bg_opaque_mask));
+#ifdef SDL12
+    memset(cached_bg_indices, 0, sizeof(cached_bg_indices));
+    memset(cached_bg_opaque, 0, sizeof(cached_bg_opaque));
+    cached_bg_valid = 0;
+    cached_bg_nametable_generation = 0;
+    cached_bg_scroll = 0;
+    cached_bg_nt = 0;
+    cached_bg_split = 0;
+#endif
 #ifndef DOS
     memset(palette_cache_valid, 0, sizeof(palette_cache_valid));
 #endif
@@ -272,6 +430,10 @@ static void video_draw_sprite(uint8_t x, uint8_t y, uint8_t tile, uint8_t attr)
     uint8_t hflip = (uint8_t)((attr >> 6) & 1);
     uint8_t vflip = (uint8_t)((attr >> 7) & 1);
     const uint8_t *opaque_src = opaque_dest ? opaque_dest : bg_opaque_mask;
+#ifndef DOS
+    const uint8_t *texels;
+    const uint8_t *pixels;
+#endif
     int row, col;
 
     if (!video_ready)
@@ -279,38 +441,54 @@ static void video_draw_sprite(uint8_t x, uint8_t y, uint8_t tile, uint8_t attr)
     chr_index = tile;
     if (chr_index >= TILES_PER_BANK)
         return;
+#ifndef DOS
+    texels = &chr_texels[chr_index * 64];
+    pixels = &rendered_tiles[palette + 4][chr_index * 64];
+#endif
 
     for (row = 0; row < TILE_HEIGHT; row++) {
         int src_row = vflip ? (TILE_HEIGHT - 1 - row) : row;
         int dest_y = y + 1 + row;
+        const uint8_t *texel_row;
+        uint8_t *claim_row;
+        const uint8_t *opaque_row;
+#ifndef DOS
+        const uint8_t *pixel_row;
+        uint8_t *destination;
+#endif
         if (dest_y >= VIDEO_HEIGHT || dest_y < 0)
             continue;
         if (drawing_sprite_index >= 0 &&
             !(sprite_row_mask[drawing_sprite_index] & (uint8_t)(1u << row)))
             continue;
+#ifndef DOS
+        texel_row = texels + src_row * 8;
+        pixel_row = pixels + src_row * 8;
+        destination = frame_index_buffer + dest_y * VIDEO_WIDTH;
+#else
+        texel_row = chr_texels + chr_index * 64 + src_row * 8;
+#endif
+        claim_row = sprite_claimed + dest_y * VIDEO_WIDTH;
+        opaque_row = opaque_src + dest_y * VIDEO_WIDTH;
         for (col = 0; col < TILE_WIDTH; col++) {
             int src_col = hflip ? (TILE_WIDTH - 1 - col) : col;
             int dest_x = x + col;
             uint8_t color_idx;
-            int pix;
             if (dest_x >= VIDEO_WIDTH || dest_x < 0)
                 continue;
-            color_idx = chr_texels[chr_index * 64 + src_row * 8 + src_col];
+            color_idx = texel_row[src_col];
             if (color_idx == 0)
                 continue;
-            pix = dest_y * VIDEO_WIDTH + dest_x;
-            if (sprite_claimed[pix] == sprite_claim_gen)
+            if (claim_row[dest_x] == sprite_claim_gen)
                 continue;
-            sprite_claimed[pix] = sprite_claim_gen;
-            if ((attr & 0x20) && opaque_src[pix])
+            claim_row[dest_x] = sprite_claim_gen;
+            if ((attr & 0x20) && opaque_row[dest_x])
                 continue;
 #ifdef DOS
             dos_vga_sprite_pixel(dest_x, dest_y,
                                  cached_expanded_palette[palette + 4][color_idx]);
 #else
-            frame_index_buffer[pix] =
-                rendered_tiles[palette + 4][chr_index * 64 +
-                                             src_row * 8 + src_col];
+            destination[dest_x] = pixel_row[src_col];
 #endif
         }
     }
@@ -495,12 +673,16 @@ void video_render_begin(void)
     dos_vga_flush_tiles();
 #else
     refresh_palette_cache();
+#ifdef SDL12
+    compose_sdl12_background();
+#else
     video_clear_target(frame_index_buffer, bg_opaque_mask);
     if (g_RenderEnabledLatch) {
         PPU_SetScroll(g_RenderScrollX, 0);
         PPU_SetScroll(0, 0);
         PPU_RenderNametable(g_RenderNT);
     }
+#endif
     mark_dirty_all();
 #endif
 }

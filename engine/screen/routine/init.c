@@ -1,11 +1,7 @@
 /* init.c - Screen initialization (from init-screen.asm) */
 
 #include "screen/screen.h"
-#ifdef NES
-#include "system/ppu.h"
-#else
 #include "system/common/ppu_memory.h"
-#endif
 #include "constants/globals.h"
 
 /* Render nametable latch corresponding to Mirror_PPU_CTRL_REG1 bit 0

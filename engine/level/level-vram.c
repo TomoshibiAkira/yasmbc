@@ -3,11 +3,7 @@
 #include <string.h>
 #include "level/level.h"
 #include "level/level-internal.h"
-#ifdef NES
-#include "system/ppu.h"
-#else
 #include "system/common/ppu_memory.h"
-#endif
 
 /* Deferred VRAM write queue: the NES area parser renders into
  * VRAM_Buffer2 which the NEXT NMI flush writes to the PPU (one output
@@ -60,4 +56,3 @@ void GetMetatileTiles(uint8_t metatile, uint8_t tiles[4]) {
     const uint8_t* table = MetatileGfxTables[group];
     memcpy(tiles, &table[index * 4], 4);
 }
-

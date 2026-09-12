@@ -16,7 +16,7 @@ This tree splits that in two:
   and the sound *driver*. It is translated from the disassembly under
   `smb1-disasm/`.
 - **`system/`** is the host: window, keyboard, software PPU, APU synthesis.
-  SDL, DOS, and the terminal frontend all implement the same
+  SDL2, SDL 1.2, DOS, and terminal frontends all implement the same
   [`system/platform.h`](../system/platform.h) API.
 
 Nintendo graphics, music, and level bytes are not in git. You extract them
@@ -29,9 +29,9 @@ engine/  (translated SMB logic)
     |
 platform.h
     +-- system/sdl/        PC window
+    +-- system/sdl12/      Win98-compatible SDL 1.2 surface
     +-- system/dos/        VGA + Sound Blaster
     +-- system/terminal/   ANSI true-color
-    +-- system/nes/        retained NES stub
 ```
 
 ## Where to start
@@ -321,7 +321,8 @@ Gameplay only **queues** songs and SFX (`g_EventMusicQueue`,
 `g_Square1SoundQueue`, …). `Audio_SoundEngine` in
 [`engine/audio.c`](../engine/audio.c) is the original driver: priorities,
 note counters, pause. It writes APU registers through
-`platform_apu_write`. SDL and DOS turn those writes into PCM with Nes_Snd_Emu.
+`platform_apu_write`. SDL and DOS turn those writes into PCM with Nes_Snd_Emu;
+the SDL 1.2 compatibility frontend sends them through its SDL 1.2 APU callback.
 Music bytes are `assets/audio/music_data.bin`. Full notes: [audio.md](audio.md).
 
 ## How a picture is built (host)
@@ -336,10 +337,13 @@ Each present:
 1. Clear to backdrop (`PPU_ReadPalette(0)`).
 2. If the screen is enabled, draw the scrolled nametable from CHR.
 3. Draw sprites from `g_RenderOAM` (8×8, sprite-0 HUD split when flagged).
-4. Upload a 256×240 buffer (SDL texture, VGA page, or ANSI cells).
+4. Upload a 256×240 buffer (SDL texture, SDL 1.2 surface, VGA page, or ANSI
+   cells).
 
-The NES nametable persists in PPU RAM. SDL still *rebuilds pixels* every
-frame from that RAM; it does not keep a dirty framebuffer as game state.
+The NES nametable persists in PPU RAM. SDL2 rebuilds its pixel image every
+frame from that RAM, while the SDL 1.2 adapter keeps a presentation-only
+background cache and applies camera shifts plus dirty-tile updates. Neither
+cache is game state; PPU RAM remains the source of truth.
 
 ## Assets
 
@@ -394,6 +398,7 @@ A longer matching frame prefix by itself is not a fix.
 | Coin sparkle palette | `Player_ColorRotation` in `player-sprite.c` |
 | Jump SFX / overworld theme | `engine/audio.c` |
 | SDL window | `system/sdl/platform_sdl.c` |
+| SDL 1.2 / Win98 surface | `system/sdl12/platform_sdl12.c` |
 | Nametable pixels | `system/sdl/video_soft.c` |
 | RAM names | `constants/globals.h` |
 | Entity IDs / music IDs | `constants/entity_constants.h`, `music_constants.h` |

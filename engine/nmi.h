@@ -31,8 +31,4 @@ extern uint8_t g_RenderSprite0Split;
 
 void NMI_Tick(uint8_t raw_input0, uint8_t raw_input1);
 
-#ifdef NES
-void nmi_handler(void);
-#endif
-
 #endif

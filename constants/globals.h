@@ -101,7 +101,7 @@ extern uint8_t g_ZeroPageScratch07;      /* $0007: DecodeAreaData/GetLrgObjAttri
 extern uint8_t g_EntranceBubbleYMF;      /* $0431: Bubble_YMF_Dummy+5 alias */
 extern uint8_t g_BalPlatformAlignment;  /* $03A0 */
 extern uint8_t g_Platform_X_Scroll;     /* $03A1 */
-extern uint8_t g_AreaMusicQueue;        /* AreaMusicQueue; audio playback excluded */
+extern uint8_t g_AreaMusicQueue;        /* AreaMusicQueue; consumed by Audio_SoundEngine */
 extern uint8_t g_JoypadOverride;        /* $0758 */
 extern uint8_t g_PlayerEntranceCtrl;    /* $0710 */
 extern uint8_t g_AreaNumber;             /* $0760 */

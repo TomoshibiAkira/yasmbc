@@ -2,10 +2,10 @@
  * ASM-first SMB sound driver.
  *
  * The game-specific driver is kept separate from the host 2A03 renderer so
- * NES builds can write the same registers directly.  This file intentionally
- * retains the original RAM/state-machine boundaries, but uses descriptive C
- * names at those boundaries rather than exposing 6502 temporary-register
- * names to the rest of the port.
+ * Host backends receive the same ordered register writes through the platform
+ * API. This file intentionally retains the original RAM/state-machine
+ * boundaries, but uses descriptive C names at those boundaries rather than
+ * exposing 6502 temporary-register names to the rest of the port.
  */
 #include <string.h>
 
@@ -931,7 +931,7 @@ static void handle_music(void) {
 }
 
 static void handle_pause_sound(void) {
-    uint8_t frequency_index;
+    uint8_t note_index;
 
     if (!audio_state.pause_buffer) {
         if (!g_PauseSoundQueue)
@@ -944,15 +944,15 @@ static void handle_pause_sound(void) {
         audio_state.square1_sfx_length_counter = PAUSE_SOUND_LENGTH;
     }
 
-    frequency_index = (audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_LATE ||
-                       audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_EARLY)
-                          ? PAUSE_SECOND_TONE_NOTE_INDEX
-                          : PAUSE_FIRST_TONE_NOTE_INDEX;
+    note_index = (audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_LATE ||
+                  audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_EARLY)
+                     ? PAUSE_SECOND_TONE_NOTE_INDEX
+                     : PAUSE_FIRST_TONE_NOTE_INDEX;
     if (audio_state.square1_sfx_length_counter == PAUSE_SOUND_LENGTH ||
         audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_LATE ||
         audio_state.square1_sfx_length_counter == PAUSE_FIRST_TONE_REPEAT ||
         audio_state.square1_sfx_length_counter == PAUSE_SECOND_TONE_EARLY)
-        play_square1(APU_PAUSE_VOLUME, APU_SQUARE_SWEEP_DEFAULT, frequency_index);
+        play_square1(APU_PAUSE_VOLUME, APU_SQUARE_SWEEP_DEFAULT, note_index);
 
     if (audio_state.square1_sfx_length_counter && --audio_state.square1_sfx_length_counter == 0) {
         apu_write(APU_STATUS, 0);

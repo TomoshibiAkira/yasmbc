@@ -344,8 +344,8 @@ void setup_floaty_number(EnemySlot* e, uint8_t control) {
     e->floaty_x = g_Enemy_Rel_XPos;
 }
 
-/* HandlePowerUpCollision (main.asm:8451-8497).  Sound/APU playback remains
- * excluded; the gameplay state and music queue writes are retained. */
+/* HandlePowerUpCollision (main.asm:8451-8497).  The gameplay state and music
+ * queue writes are retained; Audio_SoundEngine performs the APU writes. */
 void handle_powerup_collision(EnemySlot* e) {
     uint8_t type = s_PowerUpType;
 

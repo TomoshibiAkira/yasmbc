@@ -28,13 +28,19 @@ The delivery contains `SMB2.EXE`, packed `ASSETS.DAT`, `CWSDPMI.EXE`, and
 8.3-compatible file. Boot DOS separately, then run from the floppy or copy the
 files to a writable hard disk.
 
-The executable is compatible with a 386 and needs about 4 MiB RAM, but this is
-not a 60 FPS claim. A visually correct 486DX/66 run reported about 58 FPS at a
-measured 58 Hz retrace rate. Profiled 486DX/33 runs of the final renderer family
-were around 40--42 presented FPS during the 1,200-frame workload, while the
-logic clock continued near 60 Hz by skipping presentations and catching up.
-These headline results are not direct scaling comparisons; see the benchmark
-contract below.
+The executable uses a 386-compatible instruction set and needs about 4 MiB RAM,
+but that is a compatibility floor, not a full-speed specification. There is no
+single CPU-only performance floor for this renderer: Mode X upload time depends
+on the CPU and chipset, bus width and clock, VGA aperture behavior, display
+adapter, and the emulator's model of all of them.
+
+Historical 86Box runs reported about 58 presented FPS on one 486DX/66 setup at
+a measured 58 Hz retrace rate, and roughly 40--42 presented FPS on a different
+486DX/33 setup during the 1,200-frame workload. These numbers describe those
+complete virtual-machine configurations and are not a processor scaling curve
+or a promise for every card carrying the same CPU. The logic clock can remain
+near NTSC speed by running catch-up ticks while presentation falls behind; see
+the benchmark contract below.
 
 ## Architecture and frame flow
 
@@ -72,10 +78,9 @@ ET4000-class VGA.
 
 ## Mode X layout
 
-The host derives unchained 320x240 Mode X at approximately 60 Hz from BIOS mode
-13h. The 256x240 game image is centered with black hardware overscan. Resolved
-NES color indices occupy separate 32-entry DAC banks for the two pages, so the
-inactive page's palette can be changed safely.
+The host derives unchained 256x240 Mode X at approximately 60 Hz from BIOS mode
+13h. Resolved NES color indices occupy separate 32-entry DAC banks for the two
+pages, so the inactive page's palette can be changed safely.
 
 Each scanline stores a 264-pixel ring twice:
 
@@ -117,10 +122,11 @@ all HUD spans. The small cdecl i386 kernel `dos_direct_tile` writes one plane of
 an 8x8 tile to both aliases; `dos_copy_span` handles the HUD. Keeping only these
 predictable stores in assembly makes their access pattern explicit. The RAM
 compositor remains C: DJGPP `-O2 -mtune=i486` already produces reasonable code
-for these loops, and the measured limits are dominated by algorithmic work and
-VGA traffic rather than a broad compiler-code-generation failure. Rewriting
+for these loops. Equal-work profiling showed useful but small compositor gains
+from the final C-side changes; the remaining end-to-end cost can instead be
+dominated by VGA aperture writes on a slow adapter/bus combination. Rewriting
 the whole renderer in assembly would add substantial maintenance cost without
-removing composition or VGA bus traffic.
+removing those writes or their wait states.
 
 ## HUD and sprite-0 split
 
@@ -176,8 +182,8 @@ The final design came from these measured iterations:
    per-page residency prevented alternating stale/blank frames.
 3. **CRTC plus pel-pan scrolling:** replaced framebuffer shifts with entering
    columns.
-4. **Direct scattered VGA rendering:** looked cheap in emulators but made real
-   486 VGA-aperture accesses the bottleneck.
+4. **Direct scattered VGA rendering:** looked cheap in simplified emulator
+   models but amplified VGA-aperture access cost on period-style hardware.
 5. **RAM preparation and plane-major batches:** restored locality and reduced
    Sequencer programming to four plane selections per flush.
 6. **Mirrored 264-pixel ring:** removed periodic page rebase hitches while
@@ -215,12 +221,14 @@ The latter slightly reduced average audio work per logic tick but concentrated
 it into larger deadline-breaking spikes, so per-NMI draining was restored.
 
 The v7 row-level sprite and preclassified-tile changes did not materially move
-the end-to-end 486DX/33 FPS class. They are nevertheless retained because an
-equal-work comparison of 227 trace frames reduced compositor time from 2.567
-to 2.376 ms and dirty/sprite staging from 0.815 to 0.707 ms, while producing
-the same VGA work and passing the pixel-exact renderer suite. The apparent
-whole-run reversal was caused by unequal catch-up work, not slower rendering of
-the same frame.
+the end-to-end FPS of the 486DX/33 configuration used for that experiment. They
+are nevertheless retained because an equal-work comparison of 227 trace frames
+reduced compositor time from 2.567 to 2.376 ms and dirty/sprite staging from
+0.815 to 0.707 ms, while producing the same VGA work and passing the pixel-exact
+renderer suite. The apparent whole-run reversal was caused by unequal catch-up
+work, not slower rendering of the same frame. This result must not be generalized
+to a different VGA adapter: unchanged upload bytes can take materially different
+wall-clock time on another card or bus implementation.
 
 ## Benchmark and validation
 
@@ -230,15 +238,27 @@ the same frame.
 ```text
 BENCH --frames 3600
 BENCH --diagnostic --no-audio
+BENCH --diagnostic --no-wait --no-audio
+BENCH --diagnostic --no-upload --no-audio
+BENCH --diagnostic --no-compositor --no-audio
 BENCH --diagnostic --readback --no-audio
 BENCH --profile-renderer --frames 3600
 ```
 
-`--diagnostic` isolates video. `--readback` validates VGA writes but is too
-expensive for performance measurement. `--profile-renderer` adds HUD/sprite
-subtimers. Inspect per-frame work, compositor/upload/audio time, bytes, tiles,
-p95/p99/max, frames over 14 and 16.67 ms, and audio underruns. Average FPS alone
-hides scrolling and transition spikes.
+`--diagnostic` replaces gameplay with a deterministic scrolling scene.
+`--no-wait` removes retrace pacing, `--no-upload` keeps RAM preparation but
+skips VGA writes, and `--no-compositor` skips both preparation and upload.
+Compare these modes on the same configuration to separate synchronization,
+CPU composition, and VGA-aperture cost. Diagnostic startup also records
+`probe_1MiB_seconds`, a simple one-mebibyte plane-write probe useful for
+comparing VGA configurations; it is not a renderer throughput score.
+
+`--readback` validates VGA writes but is deliberately too expensive for
+performance measurement. `--profile-renderer` adds HUD content/diff and sprite
+subtimers and also changes timing slightly. Inspect per-frame work,
+compositor/upload/audio time, bytes, tiles, p95/p99/max, frames over 14 and
+16.67 ms, and audio underruns. Average FPS alone hides scrolling and transition
+spikes.
 
 The normal benchmark is presentation-count bounded, not logic-tick bounded.
 Logic follows wall-clock NTSC time: whenever presentation slows, the next loop
@@ -247,11 +267,15 @@ farther into the demo, process more sprites/tiles, and make itself still slower.
 Compare builds using identical-work trace rows or a fixed input and logic-frame
 interval; do not rank them solely by `game_fps`, `logic_ticks`, or aggregate
 `tiles_plotted` from separate wall-clock runs. `--profile-renderer` also adds
-timer calls and is intentionally more expensive than `SMB2.EXE`.
+timer calls and is intentionally more expensive than `SMB2.EXE`. Record
+`retrace_hz` alongside `game_fps`: a retrace-limited run near 58 Hz cannot report
+60 presentations per second even when it meets every display deadline.
 
-`make test-dos-renderer` compares the production renderer with SDL across 2,200
-synthetic frames, including random nametable/palette/OAM changes, reverse
+`make test-dos-renderer` compares the production renderer with the shared
+software reference across 2,200 synthetic frames, including random
+nametable/palette/OAM changes, reverse
 scroll, ring wrap, HUD split, sprite priority, and screen disable. This proves
 snapshot rendering equivalence, not physical scanout timing. DOSBox is useful
-for regressions; 86Box with the intended CPU/VGA is the visual/performance
-proxy.
+for functional regressions. 86Box is the visual/performance proxy only when its
+CPU, bus, and VGA configuration are recorded; changing the VGA model changes
+the tested machine.

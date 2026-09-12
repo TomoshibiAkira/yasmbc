@@ -7,7 +7,8 @@ fed to [Blargg's Nes_Snd_Emu](https://github.com/blarggs-audio-libraries/Nes_Snd
 
 This tree is the playable program. It does not contain Nintendo ROM or CHR
 data. You can extract those from a dump you already own with provided
-tool script. The running binary never opens the original ROM.
+tool script. The running binaries never open the original ROM; the dump is
+only an asset-extraction source, and this tree no longer builds a NES ROM.
 
 If you wish to dive into the code, [walkthrough.md](docs/walkthrough.md) is 
 a good starting point.
@@ -18,6 +19,7 @@ a good starting point.
 - GNU Make
 - Python 3 (asset extraction only)
 - SDL2 development files (for Linux/SDL build)
+- SDL 1.2 development files plus a Win98-capable x86 compiler (for legacy Windows build)
 - DJGPP (for DOS VGA build)
 - MinGW (for Windows build)
 
@@ -43,8 +45,9 @@ Use a Super Mario Bros. (W) [!] iNES dump whose SHA-1 is
 make extract ROM=/path/to/Super\ Mario\ Bros.\ \(W\)\ \[\!\].nes
 ```
 
-`make sdl` and `make sdl-release` run extraction automatically when
-`assets/` is missing, using `ROM=` or the `SMB_ROM` environment variable.
+`make sdl`, `make sdl-release`, and `make sdl12-release` run extraction
+automatically when `assets/` is missing, using `ROM=` or the `SMB_ROM`
+environment variable.
 
 Generated files (`assets/areas/`, `enemies/`, `audio/`, `tables/`,
 `tiles.chr`) are not part of git. See [assets/README.md](assets/README.md).
@@ -62,6 +65,7 @@ make sdl-release
 |--------|--------|--------|
 | `make` / `make sdl` | `smb2` | Debug (`-g -O0`). Headless extras enabled. |
 | `make sdl-release` | `smb2-release` | Optimized. This is the build meant for playing. |
+| `make sdl12-release` | `smb2-sdl12-release-x86.exe` | SDL 1.2 Win98 x86 frontend with APU audio. |
 | `make extract` | `assets/` | ROM required; see above. |
 | `make clean` | | Removes objects and binaries, keeps `assets/`. |
 
@@ -179,9 +183,10 @@ Ship the `dosdist/` folder:
 | `ASSETS.DAT` | Packed `assets/` (8.3 name; internal paths unchanged) |
 | `CWSDPMI.EXE` | DPMI host, if your stub does not embed one |
 
-Compatibility floor: **386-class (runnable but no playable)**, 4 MB RAM,
-VGA. The practical full-speed target is around a 486DX/66; lower machines
-are supported but are not full-speed targets during scrolling.
+Compatibility floor: **386 instruction set**, 4 MB RAM, VGA. This is not a
+playability or full-speed guarantee. DOS performance is a property of the
+whole CPU/chipset/bus/VGA configuration; there is no reliable CPU-only minimum,
+and scrolling is especially sensitive to VGA aperture write throughput.
 Sound uses a Sound Blaster at ~22 kHz if `BLASTER=` is set (for example
 `BLASTER=A220 I5 D1 T4`). No card means silence.
 
@@ -198,10 +203,42 @@ video from game logic; add `--readback` to check VGA writes (not to measure
 speed).
 For long runs such as `BENCH --frames 3600`, copy the files to a DOS hard
 disk so `FRAMES.CSV`, `BENCH.TXT` and `VGA.PPM` have sufficient free space.
-The 86Box 486DX/66 baseline was visually correct at roughly 58 FPS. Profiled
-486DX/33 runs of the final renderer family present around 40--42 FPS while
-keeping game logic near 60 Hz through catch-up. See the DOS platform document
-for the current bottlenecks and the benchmark comparison caveat.
+Historical 86Box configurations measured roughly 58 presented FPS on a
+486DX/66 setup (at a measured 58 Hz retrace) and around 40--42 FPS on a
+486DX/33 setup, while game logic remained near NTSC speed through catch-up.
+Those are complete-configuration measurements, not a processor scaling curve.
+See the DOS platform document for hardware-reporting requirements and the
+benchmark comparison caveat.
+
+## SDL 1.2 / Windows 98 compatibility build
+
+The optional `sdl12` target builds the x86-only frontend using the SDL 1.2
+surface API. It shares the game and software compositor with SDL2 and avoids
+SDL2's texture/renderer API, making it suitable for a Win98-compatible
+toolchain and SDL 1.2 `SDL.dll`:
+
+```bash
+make sdl12-release \
+  SDL12_CC=/opt/mingw32/bin/i386-pc-mingw32-gcc \
+  SDL12_CXX=/opt/mingw32/bin/i386-pc-mingw32-g++ \
+  SDL12_PREFIX=/opt/SDL-1.2.15/mingw32
+```
+
+This produces `smb2-sdl12-release-x86.exe`. Copy it with the matching 32-bit
+`SDL.dll` and `assets/`. `SMB_SDL12_SCALE=1..4` controls integer scaling and
+`SMB_SDL12_FULLSCREEN=1` requests fullscreen. Audio uses the shared
+Nes_Snd_Emu core through an SDL1.2 callback and a prebuffered ring; the default
+linear mixer leaves more CPU headroom on period machines, while
+`SMB_SDL12_AUDIO_HIFI=1` enables the more expensive nonlinear mixer.
+The release uses PII instructions and LTO (`SDL12_LTO=0` disables LTO for old
+toolchains).
+
+Legacy Win98 performance also depends strongly on the PCI display adapter and
+its driver. In the tested Pentium II configuration, an S3 ViRGE could not
+sustain the presentation path, while replacing it with an ATI Mach64 allowed
+the same build and CPU to run at full speed. CPU clock alone is therefore not
+a useful minimum-system predictor. Details and the toolchain caveats are in
+[docs/sdl12.md](docs/sdl12.md).
 
 ## ANSI terminal frontend
 
@@ -229,10 +266,10 @@ Space clears held directions.
 
 ```
 engine/           translated game (NMI, player, level, enemies, audio, …)
-system/common/    host-side PPU memory shared by SDL and DOS
+system/common/    host-side PPU memory shared by SDL, SDL 1.2, and DOS
 system/sdl/       SDL video and audio host
+system/sdl12/     SDL 1.2 Win98-compatible video/input/audio host
 system/dos/       Mode X, Sound Blaster, and DOS benchmark host
-system/nes/       retained NES platform stub and linker/startup files
 system/           platform-neutral interfaces, FM2, state streams
 constants/        shared types and RAM-named globals
 assets/           generated payloads (not in git) plus README
