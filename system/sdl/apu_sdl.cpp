@@ -9,8 +9,10 @@
 #include "../../third_party/nes_snd_emu/nes_apu/Nes_Apu.h"
 #include "../../third_party/nes_snd_emu/nes_apu/Nonlinear_Buffer.h"
 
+extern "C" int platform_audio_rate(void);
+
 namespace {
-constexpr long kSampleRate = 48000;
+constexpr long kDefaultSampleRate = 48000;
 constexpr long kCpuClock = 1789773;
 constexpr int kMaxSamples = 1024;
 
@@ -21,6 +23,7 @@ bool device_started = false;
 blip_time_t write_time = 0;
 uint32_t audio_frame = 0;
 bool initialized = false;
+long output_sample_rate = kDefaultSampleRate;
 FILE* trace_file = nullptr;
 uint32_t trace_nmi = 0;
 uint8_t trace_pre[64];
@@ -29,6 +32,13 @@ struct TraceWrite { uint16_t address; uint8_t value; };
 std::vector<TraceWrite> trace_writes;
 
 int flat_dmc_reader(void*, cpu_addr_t) { return 0x55; }
+
+long select_sample_rate() {
+    const int requested = platform_audio_rate();
+    if (requested == 22050 || requested == 44100 || requested == 48000)
+        return requested;
+    return kDefaultSampleRate;
+}
 }
 
 extern "C" void platform_audio_init(void) {
@@ -39,7 +49,8 @@ extern "C" void platform_audio_init(void) {
     buffer.clock_rate(kCpuClock);
     /* This 2005 core's default buffer-size calculation assumes 32-bit long;
      * pass an explicit duration so 64-bit hosts do not request a huge buffer. */
-    if (buffer.sample_rate(kSampleRate, 100)) {
+    output_sample_rate = select_sample_rate();
+    if (buffer.sample_rate(output_sample_rate, 100)) {
         std::fprintf(stderr, "APU: failed to configure sample buffer\n");
         return;
     }
@@ -49,7 +60,7 @@ extern "C" void platform_audio_init(void) {
 
     if (SDL_WasInit(SDL_INIT_AUDIO)) {
         SDL_AudioSpec want{};
-        want.freq = kSampleRate;
+        want.freq = static_cast<int>(output_sample_rate);
         want.format = AUDIO_S16SYS;
         want.channels = 1;
         want.samples = 1024;
@@ -132,7 +143,7 @@ extern "C" void platform_audio_frame(void) {
                            static_cast<uint32_t>(count * sizeof(samples[0])));
             if (!device_started &&
                 SDL_GetQueuedAudioSize(device) >=
-                    static_cast<uint32_t>((kSampleRate / 20) * sizeof(samples[0]))) {
+                    static_cast<uint32_t>((output_sample_rate / 20) * sizeof(samples[0]))) {
                 SDL_PauseAudioDevice(device, 0);
                 device_started = true;
             }

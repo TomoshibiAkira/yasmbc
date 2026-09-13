@@ -64,8 +64,9 @@ make sdl-release
 | Target | Output | Notes |
 |--------|--------|--------|
 | `make` / `make sdl` | `smb2` | Debug (`-g -O0`). Headless extras enabled. |
-| `make sdl-release` | `smb2-release` | Optimized. This is the build meant for playing. |
-| `make win95-release` | `smb2-win95-x86.exe` | Native Win32/GDI + WinMM Win9x frontend; no SDL dependency. |
+| `make sdl-release` | `smb2-release` | Optimized SDL build for Linux. This is the build meant for playing. |
+| `make mingw-release` | `smb2-release.exe` | Optmized SDL MinGW build for modern (XP+) Windows. |
+| `make win95-release` | `smb2-win95-x86.exe` | Native Win32/GDI + WinMM Win9x frontend, build for legacy Windows. |
 | `make extract` | `assets/` | ROM required; see above. |
 | `make clean` | | Removes objects and binaries, keeps `assets/`. |
 
@@ -102,6 +103,9 @@ Useful flags (debug builds unless noted):
 - `--headless` — no window, no frame pacing
 - `--tas PATH` — replay a text FM2 v3 power-on movie (implies headless)
 - `--frames N` — stop after N host frames
+- `--scale N` — integer display scale, from 1 to 4 (SDL default 3, Win95 default 2)
+- `--audio-rate HZ` — request 22050, 44100, or 48000 Hz output
+- `--audio-hifi` — enable nonlinear/high-quality mixing when the backend supports it
 - `--save-frames` — write `test_output/frame_XXXX.ppm` (debug only)
 
 `--dump-frame-stream`, `--dump-state-stream`, and `--nmi-inputs` are for
@@ -225,8 +229,8 @@ make win95-release \
 ```
 
 This produces `smb2-win95-x86.exe`; copy it with `assets/` and no SDL runtime.
-`SMB_WIN95_SCALE=1..4` controls integer scaling. Set
-`SMB_WIN95_AUDIO_RATE=44100` for 44.1 kHz output; the default is 22.05 kHz.
+Use `--scale N` (1–4) for integer scaling, `--audio-rate 44100` for 44.1 kHz
+output (the default is 22.05 kHz), and `--audio-hifi` for nonlinear mixing.
 The four-buffer native WaveOut queue is tuned for Win95/K6-class systems. See
 [docs/win95.md](docs/win95.md) for the API, queue, and compatibility details.
 

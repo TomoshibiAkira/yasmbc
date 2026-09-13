@@ -92,12 +92,13 @@ The ANSI terminal backend is intentionally silent.
 
 `make sdl` builds the C game, the C++ APU adapter, and the vendored core. Normal
 interactive SDL runs open an audio device; headless runs advance the APU and
-can emit deterministic traces without opening one. `make -f Makefile.mingw`
-uses the same sources for the SDL2 Windows build. The native Win95 frontend
-uses WinMM `waveOut` with a four-buffer queue at 22,050 Hz by default; set
-`SMB_WIN95_AUDIO_RATE=44100` for 44,100 Hz. Its default linear mono mixer
-leaves more CPU headroom, and `SMB_WIN95_AUDIO_HIFI=1` restores nonlinear
-mixing for listening comparisons. Period-hardware testing found the PCI video
+can emit deterministic traces without opening one. Use the common command-line
+options `--audio-rate 22050|44100|48000` and `--audio-hifi` on SDL and Win95;
+SDL defaults to 48,000 Hz and always uses its nonlinear mixer, while Win95
+defaults to 22,050 Hz with its lower-cost linear mixer. The native Win95
+frontend uses WinMM `waveOut` with a four-buffer queue; `--audio-rate 44100`
+selects 44,100 Hz and `--audio-hifi` restores nonlinear mixing for listening
+comparisons. Period-hardware testing found the PCI video
 presentation path, not APU synthesis, to be the decisive full-speed bottleneck
 in the tested configuration. Headless runs still avoid opening an audio
 device. The NES/FCEUX side remains the external reference used to specify and

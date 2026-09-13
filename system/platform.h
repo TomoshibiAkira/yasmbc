@@ -14,9 +14,21 @@ typedef struct {
     uint8_t up, down, left, right;
 } InputState;
 
+/* Common command-line configuration shared by the PC frontends.  Zero means
+ * use the backend default; audio_hifi is a request and may be ignored by a
+ * backend whose mixer is always high quality (the SDL backend, for example). */
+typedef struct {
+    int scale;
+    int audio_rate;
+    int audio_hifi;
+} PlatformOptions;
+
 void platform_init(void);
 void platform_shutdown(void);
 void platform_set_headless(uint8_t enabled);
+void platform_set_options(const PlatformOptions *options);
+int platform_audio_rate(void);
+int platform_audio_hifi(void);
 
 void platform_read_input(InputState* state);
 uint8_t platform_should_quit(void);

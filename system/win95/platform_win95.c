@@ -11,7 +11,6 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "../platform.h"
@@ -36,6 +35,9 @@ static uint8_t quit_requested;
 static uint8_t configured_headless;
 static uint8_t class_registered;
 static uint8_t timer_resolution;
+static int configured_scale;
+static int configured_audio_rate;
+static int configured_audio_hifi;
 static int scale_factor = 2;
 static DWORD next_frame_deadline;
 static unsigned frame_fraction;
@@ -76,20 +78,6 @@ void platform_save_frame(void)
 #else
 void platform_save_frame(void) {}
 #endif
-
-static int read_scale(void)
-{
-    const char *value = getenv("SMB_WIN95_SCALE");
-    char *end;
-    long parsed;
-
-    if (!value || !*value)
-        return 2;
-    parsed = strtol(value, &end, 10);
-    if (*end != '\0' || parsed < 1 || parsed > 4)
-        return 2;
-    return (int)parsed;
-}
 
 static void pump_messages(void)
 {
@@ -212,6 +200,31 @@ void platform_set_headless(uint8_t enabled)
     configured_headless = enabled ? 1 : 0;
 }
 
+void platform_set_options(const PlatformOptions *options)
+{
+    configured_scale = 0;
+    configured_audio_rate = 0;
+    configured_audio_hifi = 0;
+    if (!options)
+        return;
+    if (options->scale >= 1 && options->scale <= 4)
+        configured_scale = options->scale;
+    if (options->audio_rate == 22050 || options->audio_rate == 44100 ||
+        options->audio_rate == 48000)
+        configured_audio_rate = options->audio_rate;
+    configured_audio_hifi = options->audio_hifi ? 1 : 0;
+}
+
+int platform_audio_rate(void)
+{
+    return configured_audio_rate;
+}
+
+int platform_audio_hifi(void)
+{
+    return configured_audio_hifi;
+}
+
 uint8_t platform_win95_is_headless(void)
 {
     return configured_headless;
@@ -220,7 +233,7 @@ uint8_t platform_win95_is_headless(void)
 void platform_init(void)
 {
     quit_requested = 0;
-    scale_factor = read_scale();
+    scale_factor = configured_scale ? configured_scale : 2;
     next_frame_deadline = 0;
     frame_fraction = 0;
     pacing_started = 0;

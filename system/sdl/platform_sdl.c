@@ -21,8 +21,10 @@ static int frame_count = 0;
 static int configured_headless = 0;
 static int sdl_initialized = 0;
 static uint8_t quit_requested = 0;
-
-#define SCALE 3
+static int configured_scale = 0;
+static int configured_audio_rate = 0;
+static int configured_audio_hifi = 0;
+static int scale_factor = 3;
 
 #ifndef NDEBUG
 static int save_frame_as_ppm(const char *filename)
@@ -69,10 +71,36 @@ void platform_set_headless(uint8_t enabled)
     configured_headless = enabled ? 1 : 0;
 }
 
+void platform_set_options(const PlatformOptions *options)
+{
+    configured_scale = 0;
+    configured_audio_rate = 0;
+    configured_audio_hifi = 0;
+    if (!options)
+        return;
+    if (options->scale >= 1 && options->scale <= 4)
+        configured_scale = options->scale;
+    if (options->audio_rate == 22050 || options->audio_rate == 44100 ||
+        options->audio_rate == 48000)
+        configured_audio_rate = options->audio_rate;
+    configured_audio_hifi = options->audio_hifi ? 1 : 0;
+}
+
+int platform_audio_rate(void)
+{
+    return configured_audio_rate;
+}
+
+int platform_audio_hifi(void)
+{
+    return configured_audio_hifi;
+}
+
 void platform_init(void)
 {
     printf("platform_init: Starting...\n");
     quit_requested = 0;
+    scale_factor = configured_scale ? configured_scale : 3;
 
     if (!configured_headless) {
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
@@ -83,7 +111,7 @@ void platform_init(void)
         window = SDL_CreateWindow(
             "Super Mario Bros.",
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-            VIDEO_WIDTH * SCALE, VIDEO_HEIGHT * SCALE,
+            VIDEO_WIDTH * scale_factor, VIDEO_HEIGHT * scale_factor,
             SDL_WINDOW_SHOWN);
         if (!window) {
             fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());

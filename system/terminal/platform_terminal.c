@@ -285,6 +285,9 @@ static void terminal_present(void)
 }
 
 void platform_set_headless(uint8_t enabled) { (void)enabled; }
+void platform_set_options(const PlatformOptions *options) { (void)options; }
+int platform_audio_rate(void) { return 0; }
+int platform_audio_hifi(void) { return 0; }
 
 void platform_init(void)
 {

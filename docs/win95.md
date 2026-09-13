@@ -28,7 +28,7 @@ make win95-release \
 ```
 
 The result is `smb2-win95-x86.exe`. Copy it beside the extracted `assets/`
-directory. No SDL runtime is required. `SMB_WIN95_SCALE=1..4` selects integer
+directory. No SDL runtime is required. Pass `--scale N` (1–4) to select integer
 window scaling (default 2); headless runs retain the normal `--headless` and
 `--frames` options.
 
@@ -41,14 +41,15 @@ because their thread support may import APIs that do not exist on Win9x.
 ## Audio design
 
 The default output is 22,050 Hz, signed 16-bit mono. Select the optional
-44,100 Hz mode with `SMB_WIN95_AUDIO_RATE=44100`; any other nonempty value is
-rejected and falls back to 22,050 Hz. Four 1024-sample `WAVEHDR`s are kept in
+44,100 Hz mode with `--audio-rate 44100`; `--audio-rate 48000` is accepted by
+the common command-line parser but falls back to 22,050 Hz on this WinMM
+backend. Four 1024-sample `WAVEHDR`s are kept in
 flight, giving about 186 ms of device-side scheduling margin at 22,050 Hz (or
 93 ms at 44,100 Hz).
 The APU producer keeps a 32,768-sample ring and starts playback after one full
-four-buffer queue has been prepared. Set `SMB_WIN95_AUDIO_HIFI=1` only for
-listening comparisons; the default linear mixer leaves more CPU headroom on
-K6/Pentium systems.
+four-buffer queue has been prepared. Pass `--audio-hifi` only for listening
+comparisons; the default linear mixer leaves more CPU headroom on K6/Pentium
+systems.
 
 This is not cycle-accurate NES audio hardware emulation; it preserves the same
 APU register/state contract as the other PC builds. A hardware driver may still

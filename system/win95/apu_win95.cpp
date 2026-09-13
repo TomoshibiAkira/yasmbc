@@ -6,7 +6,6 @@
 
 #include <cstdio>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 
 #include "../../third_party/nes_snd_emu/nes_apu/Nes_Apu.h"
@@ -15,6 +14,8 @@
 
 namespace {
 extern "C" uint8_t platform_win95_is_headless(void);
+extern "C" int platform_audio_rate(void);
+extern "C" int platform_audio_hifi(void);
 
 static const long kDefaultSampleRate = 22050;
 static const long kHighSampleRate = 44100;
@@ -53,18 +54,14 @@ int flat_dmc_reader(void *, cpu_addr_t) { return 0x55; }
 
 static long select_sample_rate(void)
 {
-    const char *setting = std::getenv("SMB_WIN95_AUDIO_RATE");
-    char *end = 0;
-    long parsed;
+    const int requested = platform_audio_rate();
 
-    if (!setting || !*setting)
+    if (requested == 0)
         return kDefaultSampleRate;
-    parsed = std::strtol(setting, &end, 10);
-    if (*end == '\0' &&
-        (parsed == kDefaultSampleRate || parsed == kHighSampleRate))
-        return parsed;
+    if (requested == kDefaultSampleRate || requested == kHighSampleRate)
+        return requested;
     std::fprintf(stderr,
-                 "APU: SMB_WIN95_AUDIO_RATE must be 22050 or 44100; "
+                 "APU: Win95 audio supports 22050 or 44100 Hz; "
                  "using %ld\n", kDefaultSampleRate);
     return kDefaultSampleRate;
 }
@@ -188,15 +185,12 @@ static void service_waveout(void)
 extern "C" void platform_audio_init(void)
 {
     WAVEFORMATEX format;
-    const char *hifi_setting;
     unsigned i;
 
     if (initialized)
         return;
     output_sample_rate = select_sample_rate();
-    hifi_setting = std::getenv("SMB_WIN95_AUDIO_HIFI");
-    hifi_audio = hifi_setting && *hifi_setting &&
-                 std::strcmp(hifi_setting, "0") != 0;
+    hifi_audio = platform_audio_hifi() != 0;
     buffer = hifi_audio ? static_cast<Multi_Buffer *>(&nonlinear_buffer)
                         : static_cast<Multi_Buffer *>(&linear_buffer);
     buffer->clock_rate(kCpuClock);

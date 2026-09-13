@@ -155,6 +155,9 @@ static void remove_keyboard(void) {
     kb_installed = 0;
 }
 void platform_set_headless(uint8_t enabled) { (void)enabled; }
+void platform_set_options(const PlatformOptions *options) { (void)options; }
+int platform_audio_rate(void) { return 0; }
+int platform_audio_hifi(void) { return 0; }
 void platform_read_input(InputState *state) {
     memset(state, 0, sizeof(*state));
     state->a = key_down[0x2D] || key_down[0x52];

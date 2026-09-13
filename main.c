@@ -49,6 +49,7 @@ typedef struct {
     int save_frames;
     long max_frames;
     uint32_t tas_start;
+    PlatformOptions platform;
     const char* tas_path;
     const char* frame_stream_path;
     const char* state_stream_path;
@@ -62,6 +63,9 @@ static void print_usage(const char* program) {
         "  --tas PATH                 Replay a text FM2 v3 power-on movie\n"
         "  --tas-start FRAME          Start candidate input at this FM2 frame\n"
         "  --frames COUNT             Stop after COUNT candidate frames\n"
+        "  --scale N                  Integer display scale (1..4)\n"
+        "  --audio-rate HZ            Audio output rate (22050, 44100, or 48000)\n"
+        "  --audio-hifi               Enable high-quality audio mixing when available\n"
         "  --dump-frame-stream PATH   Write SMBFRM1 palette-index stream ('-' = stdout)\n"
         "  --dump-state-stream PATH   Write SMBSTA2 canonical RAM state stream\n"
         "  --nmi-inputs PATH          Consume two controller bytes by actual NMI ordinal\n"
@@ -106,6 +110,21 @@ static int parse_options(int argc, char** argv, RunOptions* options) {
         } else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
             if (parse_nonnegative(argv[++i], &value) < 0) return -1;
             options->max_frames = (long)value;
+        } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+            if (parse_nonnegative(argv[++i], &value) < 0 || value < 1 || value > 4) {
+                fprintf(stderr, "--scale must be an integer from 1 to 4\n");
+                return -1;
+            }
+            options->platform.scale = (int)value;
+        } else if (strcmp(argv[i], "--audio-rate") == 0 && i + 1 < argc) {
+            if (parse_nonnegative(argv[++i], &value) < 0 ||
+                (value != 22050 && value != 44100 && value != 48000)) {
+                fprintf(stderr, "--audio-rate must be 22050, 44100, or 48000 Hz\n");
+                return -1;
+            }
+            options->platform.audio_rate = (int)value;
+        } else if (strcmp(argv[i], "--audio-hifi") == 0) {
+            options->platform.audio_hifi = 1;
         } else if (strcmp(argv[i], "--dump-frame-stream") == 0 && i + 1 < argc) {
             options->frame_stream_path = argv[++i];
             options->headless = 1;
@@ -489,6 +508,7 @@ int main(int argc, char* argv[]) {
     }
 
     printf("SMB2: Starting...\n");
+    platform_set_options(&options.platform);
     platform_set_headless((uint8_t)options.headless);
     platform_init();
     platform_audio_init();
