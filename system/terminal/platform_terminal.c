@@ -36,7 +36,7 @@ static struct timespec next_tick;
 static TermCell previous[MAX_COLS * MAX_ROWS];
 static int previous_valid;
 static int previous_cols, previous_rows;
-static unsigned char direction[4], pulse[2], jump_frames, run_held;
+static unsigned char direction[2][4], pulse[2][2], jump_frames[2], run_held[2];
 static unsigned char escape_state;
 static char output[OUT_BYTES];
 static int dump_frame, dump_presentations;
@@ -156,6 +156,7 @@ static void terminal_present(void)
     int cols, rows, sx, sy, half, row, col;
     int active_fg = -1, active_bg = -1;
     char status[160];
+    int any_input = 0;
     size_t status_length = 0;
     size_t at = 0;
 
@@ -253,23 +254,35 @@ static void terminal_present(void)
     }
     at = append_text(at, "\033[0m", 4);
     status_length += (size_t)snprintf(status + status_length,
-                                     sizeof(status) - status_length, "INPUT:");
+                                     sizeof(status) - status_length, "INPUT P1:");
 #define ADD_INPUT(active, label)                                                \
     do {                                                                        \
-        if (active)                                                             \
+        if (active) {                                                           \
+            any_input = 1;                                                      \
             status_length += (size_t)snprintf(status + status_length,           \
                 sizeof(status) - status_length, " %s", label);                 \
+        }                                                                       \
     } while (0)
-    ADD_INPUT(direction[0], "UP");
-    ADD_INPUT(direction[1], "DOWN");
-    ADD_INPUT(direction[2], "LEFT");
-    ADD_INPUT(direction[3], "RIGHT");
-    ADD_INPUT(jump_frames, "A(JUMP)");
-    ADD_INPUT(run_held, "B(RUN)");
-    ADD_INPUT(pulse[0], "START");
-    ADD_INPUT(pulse[1], "SELECT");
+    ADD_INPUT(direction[0][0], "UP");
+    ADD_INPUT(direction[0][1], "DOWN");
+    ADD_INPUT(direction[0][2], "LEFT");
+    ADD_INPUT(direction[0][3], "RIGHT");
+    ADD_INPUT(jump_frames[0], "A(JUMP)");
+    ADD_INPUT(run_held[0], "B(RUN)");
+    ADD_INPUT(pulse[0][0], "START");
+    ADD_INPUT(pulse[0][1], "SELECT");
+    status_length += (size_t)snprintf(status + status_length,
+                                     sizeof(status) - status_length, " P2:");
+    ADD_INPUT(direction[1][0], "UP");
+    ADD_INPUT(direction[1][1], "DOWN");
+    ADD_INPUT(direction[1][2], "LEFT");
+    ADD_INPUT(direction[1][3], "RIGHT");
+    ADD_INPUT(jump_frames[1], "A(JUMP)");
+    ADD_INPUT(run_held[1], "B(RUN)");
+    ADD_INPUT(pulse[1][0], "START");
+    ADD_INPUT(pulse[1][1], "SELECT");
 #undef ADD_INPUT
-    if (status_length == 6)
+    if (!any_input)
         status_length += (size_t)snprintf(status + status_length,
                                          sizeof(status) - status_length, " NONE");
     at = append_format(at, "\033[%d;%dH", rows + 1, 1, 0);
@@ -337,12 +350,14 @@ void platform_read_input(InputState *state)
 {
     unsigned char input[128];
     ssize_t count;
-    int i;
-    for (i = 0; i < 2; i++)
-        if (pulse[i])
-            pulse[i]--;
-    if (jump_frames)
-        jump_frames--;
+    int i, player;
+    for (player = 0; player < 2; player++) {
+        for (i = 0; i < 2; i++)
+            if (pulse[player][i])
+                pulse[player][i]--;
+        if (jump_frames[player])
+            jump_frames[player]--;
+    }
     if (dump_frame) {
         memset(state, 0, sizeof(*state));
         return;
@@ -357,10 +372,10 @@ void platform_read_input(InputState *state)
                     continue;
             } else if (escape_state == 2) {
                 switch (c) {
-                case 'A': direction[0] ^= 1; direction[1] = 0; break;
-                case 'B': direction[1] ^= 1; direction[0] = 0; break;
-                case 'D': direction[2] ^= 1; direction[3] = 0; break;
-                case 'C': direction[3] ^= 1; direction[2] = 0; break;
+                case 'A': direction[0][0] ^= 1; direction[0][1] = 0; break;
+                case 'B': direction[0][1] ^= 1; direction[0][0] = 0; break;
+                case 'D': direction[0][2] ^= 1; direction[0][3] = 0; break;
+                case 'C': direction[0][3] ^= 1; direction[0][2] = 0; break;
                 }
                 escape_state = 0;
                 continue;
@@ -372,29 +387,58 @@ void platform_read_input(InputState *state)
             } else if (c == 'x' || c == 'X') {
                 /* Terminals do not report key-up.  Make jump a complete,
                  * predictable action instead of requiring a second press. */
-                jump_frames = 24;
+                jump_frames[0] = 24;
             } else if (c == 'c' || c == 'C') {
-                jump_frames = 5;
+                jump_frames[0] = 5;
             } else if (c == 'z' || c == 'Z') {
-                run_held ^= 1;
+                run_held[0] ^= 1;
             } else if (c == '\r' || c == '\n') {
-                pulse[0] = 3;
+                pulse[0][0] = 3;
             } else if (c == 0x7f || c == 0x08) {
-                pulse[1] = 3;
+                pulse[0][1] = 3;
+            } else if (c == 'w' || c == 'W') {
+                direction[1][0] ^= 1;
+                direction[1][1] = 0;
+            } else if (c == 's' || c == 'S') {
+                direction[1][1] ^= 1;
+                direction[1][0] = 0;
+            } else if (c == 'a' || c == 'A') {
+                direction[1][2] ^= 1;
+                direction[1][3] = 0;
+            } else if (c == 'd' || c == 'D') {
+                direction[1][3] ^= 1;
+                direction[1][2] = 0;
+            } else if (c == 'n' || c == 'N') {
+                jump_frames[1] = 24;
+            } else if (c == 'm' || c == 'M') {
+                run_held[1] ^= 1;
+            } else if (c == 'k' || c == 'K') {
+                pulse[1][0] = 3;
+            } else if (c == 'j' || c == 'J') {
+                pulse[1][1] = 3;
             } else if (c == ' ') {
                 memset(direction, 0, sizeof(direction));
+                memset(run_held, 0, sizeof(run_held));
             }
         }
     }
     memset(state, 0, sizeof(*state));
-    state->up = direction[0];
-    state->down = direction[1];
-    state->left = direction[2];
-    state->right = direction[3];
-    state->a = jump_frames != 0;
-    state->b = run_held;
-    state->start = pulse[0] != 0;
-    state->select = pulse[1] != 0;
+    state->controllers[0].up = direction[0][0];
+    state->controllers[0].down = direction[0][1];
+    state->controllers[0].left = direction[0][2];
+    state->controllers[0].right = direction[0][3];
+    state->controllers[0].a = jump_frames[0] != 0;
+    state->controllers[0].b = run_held[0];
+    state->controllers[0].start = pulse[0][0] != 0;
+    state->controllers[0].select = pulse[0][1] != 0;
+    state->controllers[1].up = direction[1][0];
+    state->controllers[1].down = direction[1][1];
+    state->controllers[1].left = direction[1][2];
+    state->controllers[1].right = direction[1][3];
+    state->controllers[1].a = jump_frames[1] != 0;
+    state->controllers[1].b = run_held[1];
+    state->controllers[1].start = pulse[1][0] != 0;
+    state->controllers[1].select = pulse[1][1] != 0;
 }
 
 uint8_t platform_should_quit(void) { return quit_requested ? 1 : 0; }

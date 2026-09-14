@@ -162,7 +162,8 @@ underruns, missing samples, overruns, DMA blocks, and FIFO occupancy.
 
 An IRQ 1 handler records make/break scancodes so simultaneous controls work.
 X/keypad-0 is A, Z/keypad-dot is B, Enter is Start, Backspace is Select, arrows
-are the D-pad, and Escape quits. Shutdown restores keyboard and Sound Blaster
+are the D-pad. Player 2 uses W/A/S/D for the D-pad, N/M for A/B, and K/J for
+Start/Select. Escape quits. Shutdown restores keyboard and Sound Blaster
 vectors/PIC masks, releases DMA memory, restores text mode, and disables DJGPP
 near pointers.
 

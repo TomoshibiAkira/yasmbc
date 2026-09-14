@@ -88,6 +88,9 @@ make sdl
 | B | Z or keypad `.` |
 | Start | Enter |
 | Select | Backspace |
+| Player 2 D-pad | W/A/S/D |
+| Player 2 A / B | N / M |
+| Player 2 Start / Select | K / J |
 | Quit | Esc |
 
 ## Headless and movies

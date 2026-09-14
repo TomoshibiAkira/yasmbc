@@ -283,21 +283,34 @@ void platform_shutdown(void)
 
 void platform_read_input(InputState *state)
 {
+    ControllerInput *player1;
+    ControllerInput *player2;
+
     memset(&current_input, 0, sizeof(current_input));
     if (!configured_headless) {
+        player1 = &current_input.controllers[0];
+        player2 = &current_input.controllers[1];
         pump_messages();
         if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0)
             quit_requested = 1;
-        current_input.a = (GetAsyncKeyState('X') & 0x8000) != 0 ||
-                          (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0;
-        current_input.b = (GetAsyncKeyState('Z') & 0x8000) != 0 ||
-                          (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0;
-        current_input.select = (GetAsyncKeyState(VK_BACK) & 0x8000) != 0;
-        current_input.start = (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
-        current_input.up = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
-        current_input.down = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
-        current_input.left = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
-        current_input.right = (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+        player1->a = (GetAsyncKeyState('X') & 0x8000) != 0 ||
+                     (GetAsyncKeyState(VK_NUMPAD0) & 0x8000) != 0;
+        player1->b = (GetAsyncKeyState('Z') & 0x8000) != 0 ||
+                     (GetAsyncKeyState(VK_DECIMAL) & 0x8000) != 0;
+        player1->select = (GetAsyncKeyState(VK_BACK) & 0x8000) != 0;
+        player1->start = (GetAsyncKeyState(VK_RETURN) & 0x8000) != 0;
+        player1->up = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
+        player1->down = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+        player1->left = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+        player1->right = (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+        player2->a = (GetAsyncKeyState('N') & 0x8000) != 0;
+        player2->b = (GetAsyncKeyState('M') & 0x8000) != 0;
+        player2->select = (GetAsyncKeyState('J') & 0x8000) != 0;
+        player2->start = (GetAsyncKeyState('K') & 0x8000) != 0;
+        player2->up = (GetAsyncKeyState('W') & 0x8000) != 0;
+        player2->down = (GetAsyncKeyState('S') & 0x8000) != 0;
+        player2->left = (GetAsyncKeyState('A') & 0x8000) != 0;
+        player2->right = (GetAsyncKeyState('D') & 0x8000) != 0;
     }
     *state = current_input;
 }

@@ -168,6 +168,8 @@ void platform_read_input(InputState *state)
 {
     SDL_Event e;
     const uint8_t *keys;
+    ControllerInput *player1;
+    ControllerInput *player2;
 
     memset(&current_input, 0, sizeof(current_input));
     while (SDL_PollEvent(&e)) {
@@ -178,14 +180,24 @@ void platform_read_input(InputState *state)
             quit_requested = 1;
     }
     keys = SDL_GetKeyboardState(NULL);
-    current_input.a = keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_KP_0];
-    current_input.b = keys[SDL_SCANCODE_Z] || keys[SDL_SCANCODE_KP_PERIOD];
-    current_input.select = keys[SDL_SCANCODE_BACKSPACE];
-    current_input.start = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER];
-    current_input.up = keys[SDL_SCANCODE_UP];
-    current_input.down = keys[SDL_SCANCODE_DOWN];
-    current_input.left = keys[SDL_SCANCODE_LEFT];
-    current_input.right = keys[SDL_SCANCODE_RIGHT];
+    player1 = &current_input.controllers[0];
+    player2 = &current_input.controllers[1];
+    player1->a = keys[SDL_SCANCODE_X] || keys[SDL_SCANCODE_KP_0];
+    player1->b = keys[SDL_SCANCODE_Z] || keys[SDL_SCANCODE_KP_PERIOD];
+    player1->select = keys[SDL_SCANCODE_BACKSPACE];
+    player1->start = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_KP_ENTER];
+    player1->up = keys[SDL_SCANCODE_UP];
+    player1->down = keys[SDL_SCANCODE_DOWN];
+    player1->left = keys[SDL_SCANCODE_LEFT];
+    player1->right = keys[SDL_SCANCODE_RIGHT];
+    player2->a = keys[SDL_SCANCODE_N];
+    player2->b = keys[SDL_SCANCODE_M];
+    player2->select = keys[SDL_SCANCODE_J];
+    player2->start = keys[SDL_SCANCODE_K];
+    player2->up = keys[SDL_SCANCODE_W];
+    player2->down = keys[SDL_SCANCODE_S];
+    player2->left = keys[SDL_SCANCODE_A];
+    player2->right = keys[SDL_SCANCODE_D];
     *state = current_input;
 }
 

@@ -159,15 +159,26 @@ void platform_set_options(const PlatformOptions *options) { (void)options; }
 int platform_audio_rate(void) { return 0; }
 int platform_audio_hifi(void) { return 0; }
 void platform_read_input(InputState *state) {
+    ControllerInput *player1 = &state->controllers[0];
+    ControllerInput *player2 = &state->controllers[1];
+
     memset(state, 0, sizeof(*state));
-    state->a = key_down[0x2D] || key_down[0x52];
-    state->b = key_down[0x2C] || key_down[0x53];
-    state->select = key_down[0x0E];
-    state->start = key_down[0x1C];
-    state->up = key_down[0x48];
-    state->down = key_down[0x50];
-    state->left = key_down[0x4B];
-    state->right = key_down[0x4D];
+    player1->a = key_down[0x2D] || key_down[0x52];
+    player1->b = key_down[0x2C] || key_down[0x53];
+    player1->select = key_down[0x0E];
+    player1->start = key_down[0x1C];
+    player1->up = key_down[0x48];
+    player1->down = key_down[0x50];
+    player1->left = key_down[0x4B];
+    player1->right = key_down[0x4D];
+    player2->a = key_down[0x31];      /* N */
+    player2->b = key_down[0x32];      /* M */
+    player2->select = key_down[0x24]; /* J */
+    player2->start = key_down[0x25];  /* K */
+    player2->up = key_down[0x11];     /* W */
+    player2->down = key_down[0x1F];   /* S */
+    player2->left = key_down[0x1E];   /* A */
+    player2->right = key_down[0x20];  /* D */
     if (key_down[0x01])
         quit_requested = 1;
 }

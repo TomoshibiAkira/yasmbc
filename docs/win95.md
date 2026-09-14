@@ -32,6 +32,9 @@ directory. No SDL runtime is required. Pass `--scale N` (1–4) to select intege
 window scaling (default 2); headless runs retain the normal `--headless` and
 `--frames` options.
 
+Player 1 uses the arrow keys, X/Z, Enter, and Backspace. Player 2 uses W/A/S/D
+for the D-pad, N/M for A/B, and K/J for Start/Select.
+
 `make win95-release` runs `win95-audit`, which rejects CMOV/MMX/SSE-family
 instructions, Windows XP synchronization imports, and accidental SDL imports.
 The default native build uses the legacy compiler's own Win9x-compatible

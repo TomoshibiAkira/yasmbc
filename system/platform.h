@@ -12,6 +12,10 @@ extern "C" {
 typedef struct {
     uint8_t a, b, select, start;
     uint8_t up, down, left, right;
+} ControllerInput;
+
+typedef struct {
+    ControllerInput controllers[2];
 } InputState;
 
 /* Common command-line configuration shared by the PC frontends.  Zero means

@@ -218,27 +218,36 @@ static int write_stream_frame(FILE* stream, uint32_t frame_number) {
  * with the latch sampled at NMI start. Video frames 0-3 predate NMIs. */
 #define NMI_FIRST_VIDEO_FRAME 5
 
+static uint8_t pack_controller_input(const ControllerInput *input)
+{
+    return (uint8_t)((input->a << 7) | (input->b << 6) |
+                     (input->select << 5) | (input->start << 4) |
+                     (input->up << 3) | (input->down << 2) |
+                     (input->left << 1) | input->right);
+}
+
 static void game_tick(int has_input_override, uint8_t input_override0,
                       uint8_t input_override1, uint32_t video_frame) {
     InputState input;
-    uint8_t new_bits;
+    uint8_t new_bits[2];
 
     if (has_input_override) {
         memset(&input, 0, sizeof(input));
     } else {
         platform_read_input(&input);
     }
-    new_bits = (input.a << 7) | (input.b << 6) |
-               (input.select << 5) | (input.start << 4) |
-               (input.up << 3) | (input.down << 2) |
-               (input.left << 1) | input.right;
-    if (has_input_override) new_bits = input_override0;
+    new_bits[0] = pack_controller_input(&input.controllers[0]);
+    new_bits[1] = pack_controller_input(&input.controllers[1]);
+    if (has_input_override) {
+        new_bits[0] = input_override0;
+        new_bits[1] = input_override1;
+    }
 
     if (video_frame >= NMI_FIRST_VIDEO_FRAME) {
 #ifdef DOS_BENCH
         uclock_t started = dos_bench_now();
 #endif
-        NMI_Tick(new_bits, has_input_override ? input_override1 : 0);
+        NMI_Tick(new_bits[0], new_bits[1]);
 #ifdef DOS_BENCH
         g_DosBench.nmi_ticks += dos_bench_now() - started;
 #endif
