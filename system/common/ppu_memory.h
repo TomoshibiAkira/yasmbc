@@ -20,7 +20,6 @@ uint8_t PPU_ReadPalette(uint8_t index);
 uint32_t PPU_GetRenderGeneration(void);
 uint32_t PPU_GetNametableGeneration(void);
 uint8_t PPU_TakePaletteDirty(void);
-int PPU_DirtyTileCount(void);
 void PPU_ClearDirtyTiles(void);
 
 void PPU_RenderNametable(uint8_t nt_index);

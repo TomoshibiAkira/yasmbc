@@ -47,10 +47,6 @@ static uint16_t s_last_rendered_mt = 24; /* initial parse renders 24 cols */
  * to page 0, so retain the combined page/column coordinate until dispatch. */
 static uint16_t s_PendingColIds[4];
 static uint8_t s_PendingCols = 0;
-static uint8_t s_PendingSub = 0; /* 0 = left tile col, 1 = right tile col */
-static uint8_t s_TaskPhase = 0;
-static uint8_t s_ParserWroteThisTick = 0;
-static uint8_t s_ParserHoldTick = 0;
 
 /* ScrollScreen only advances the byte accumulator; the C parser bridge also
  * needs the two metatile-column IDs that the next AreaParserTaskHandler round
@@ -59,14 +55,9 @@ static uint8_t s_ParserHoldTick = 0;
 static void queue_pending_columns(void) {
     if (g_ScrollThirtyTwo >= 0x20 && s_PendingCols == 0) {
         uint8_t n = 2;
-        s_TaskPhase = 0;
         while (n--)
             s_PendingColIds[s_PendingCols++] = s_last_rendered_mt++;
     }
-}
-
-int Scroll_AreaParserWrote(void) {
-    return s_ParserWroteThisTick != 0;
 }
 
 int Scroll_AreaParserDue(void) {
@@ -126,63 +117,6 @@ void Scroll_AreaParserComplete(void) {
         for (i = 0; i + 2 < s_PendingCols; i++)
             s_PendingColIds[i] = s_PendingColIds[i + 2];
         s_PendingCols = (uint8_t)(s_PendingCols - 2);
-    }
-    s_PendingSub = 0;
-}
-
-void Scroll_DrainOne(void) {
-    s_ParserWroteThisTick = 0;
-    if (s_PendingCols == 0) {
-        /* The final AreaParserTaskHandler round leaves Buffer2 selected
-         * through its following NMI (main.asm:675-679). */
-        if (s_ParserHoldTick) {
-            s_ParserWroteThisTick = 1;
-            s_ParserHoldTick = 0;
-        }
-        return;
-    }
-    /* AreaParserTaskHandler (main.asm:1739-1764): after the fire (which
-     * runs AreaParserCore itself), the subtask order per frame is
-     * R(left half), R(right half), IncCol, Core, R(L), R(R), IncCol.
-     * Renders therefore land at fire+1, +2, +5, +6. */
-    {
-        s_TaskPhase++;
-        uint8_t step = s_TaskPhase;
-        if (step != 1 && step != 2 && step != 5 && step != 6) {
-            if (step >= 7) {
-                s_TaskPhase = 0;
-                s_PendingCols = 0;
-            }
-            return;
-        }
-        uint16_t mt = s_PendingColIds[0];
-        uint8_t mt_page = (uint8_t)(mt / 16);
-        uint8_t mt_col = (uint8_t)(mt & 0x0f);
-        uint16_t saved_offset = s_NTBaseOffset;
-        s_NTBaseOffset = (mt_page & 1) ? 0x0400 : 0x0000;
-        if (s_PendingSub == 0) {
-            /* left half: the preceding Core composed the full metatile */
-            Level_BeginDeferred();
-            Level_RenderColumnLeftHalf(mt_page, mt_col);
-            s_ParserWroteThisTick = 1;
-            s_PendingSub = 1;
-        } else {
-            /* right tile column: consume the same Core-owned composition */
-            Level_BeginDeferred();
-            Level_RenderColumnRightHalf(mt_page, mt_col);
-            s_ParserWroteThisTick = 1;
-            s_PendingSub = 0;
-            /* shift queue */
-            s_PendingCols--;
-            s_PendingColIds[0] = s_PendingColIds[1];
-            s_PendingColIds[1] = s_PendingColIds[2];
-            s_PendingColIds[2] = s_PendingColIds[3];
-            if (s_PendingCols == 0) {
-                s_TaskPhase = 0; /* column set complete */
-                s_ParserHoldTick = 1;
-            }
-        }
-        s_NTBaseOffset = saved_offset;
     }
 }
 
@@ -302,10 +236,6 @@ void Scroll_Reset(void) {
     s_last_rendered_mt = (uint16_t)initial_page * 16u + 24u;
     g_ScrollThirtyTwo = 0;
     s_PendingCols = 0;
-    s_PendingSub = 0;
-    s_TaskPhase = 0;
-    s_ParserWroteThisTick = 0;
-    s_ParserHoldTick = 0;
 }
 
 /* ExecGameLoopback (main.asm:4802-4830) relocates the camera four pages
@@ -322,10 +252,6 @@ void Scroll_ApplyLoopback(void) {
     else
         s_last_rendered_mt = 0;
     s_PendingCols = 0;
-    s_PendingSub = 0;
-    s_TaskPhase = 0;
-    s_ParserWroteThisTick = 0;
-    s_ParserHoldTick = 0;
     /* ExecGameLoopback (main.asm:4802-4830) does not touch the scroll
      * accumulator, per-frame amount, or HorizontalScroll.  ScrollHandler
      * already ran earlier in the same GameEngine pass; preserve those

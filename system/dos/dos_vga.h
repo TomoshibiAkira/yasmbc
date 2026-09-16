@@ -12,10 +12,7 @@ int dos_vga_blit_tile(int screen_x, int screen_y, uint8_t tile, uint8_t pal,
                       const uint8_t *texels, const uint8_t *lut);
 void dos_vga_flush_tiles(void);
 void dos_vga_present_hud(void);
-void dos_vga_sprite_save_begin(void);
 void dos_vga_sprite_begin(int slot, int screen_x, int screen_y);
-void dos_vga_sprite_save_end(void);
 void dos_vga_sprite_pixel(int screen_x, int screen_y, uint8_t color);
-void dos_vga_finish_frame(void);
 
 #endif

@@ -9,17 +9,6 @@
 extern uint8_t g_RenderNT;
 extern uint8_t g_MirrorPPUCtrl1;
 
-/* Move all sprites offscreen by setting Y position to $F8 */
-static void MoveAllSpritesOffscreen(void) {
-    /* On NES: sets all 64 OAM sprite Y positions to $F8 (offscreen).
-     * Sprite data is at OAM $00-$FF, Y position every 4 bytes.
-     */
-    extern uint8_t g_SpriteData[256];
-    for (int i = 0; i < 256; i += 4) {
-        g_SpriteData[i] = 0xF8;
-    }
-}
-
 /* Initialize name tables */
 static void InitializeNameTables(void) {
     /* On NES, this fills BOTH nametables with tile $24 (background color)
@@ -55,7 +44,7 @@ static void InitializeNameTables(void) {
 }
 
 void InitScreen(void) {
-    MoveAllSpritesOffscreen();
+    Screen_MoveAllSpritesOffscreen();
     InitializeNameTables();
 
     /* NES init-screen.asm: only game modes set the VRAM buffer address

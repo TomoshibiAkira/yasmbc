@@ -274,6 +274,23 @@ static void game_frame(int has_input_override, uint8_t input_override0,
     game_render();
 }
 
+static void initialize_game_state(void) {
+    g_NumberOfPlayers = 0; /* NumberOfPlayers: 0=1P, 1=2P (main.asm) */
+    g_CurrentPlayer = 0;
+    g_WorldNumber = WORLD_1;
+    g_LevelNumber = 0;
+    g_NumberofLives = 3;
+    g_OnscreenPlayerInfo[0] = 3;
+    g_OffscreenPlayerInfo[0] = 3;
+    g_CoinTally = 0;
+    g_PlayerScore = 0;
+    Score_Reset();
+
+    OperMode_SetMode(TITLE_SCREEN_MODE);
+    g_GameEngineSubroutine = 0;
+    g_FrameCounter = 0;
+}
+
 static void game_loop_normal(void) {
     uint32_t output_frame = 0;
     printf("SMB2: Entering interactive game loop\n");
@@ -411,20 +428,7 @@ int main(int argc, char* argv[]) {
     platform_audio_init();
 #endif
 
-    g_NumberOfPlayers = 0;
-    g_CurrentPlayer = 0;
-    g_WorldNumber = WORLD_1;
-    g_LevelNumber = 0;
-    g_NumberofLives = 3;
-    g_OnscreenPlayerInfo[0] = 3;
-    g_OffscreenPlayerInfo[0] = 3;
-    g_CoinTally = 0;
-    g_PlayerScore = 0;
-    Score_Reset();
-
-    OperMode_SetMode(TITLE_SCREEN_MODE);
-    g_GameEngineSubroutine = 0;
-    g_FrameCounter = 0;
+    initialize_game_state();
 
 #ifdef DOS_BENCH
     dos_bench_start();
@@ -522,20 +526,7 @@ int main(int argc, char* argv[]) {
     platform_init();
     platform_audio_init();
 
-    g_NumberOfPlayers = 0; /* NumberOfPlayers: 0=1P, 1=2P (main.asm) */
-    g_CurrentPlayer = 0;
-    g_WorldNumber = WORLD_1;
-    g_LevelNumber = 0;
-    g_NumberofLives = 3;
-    g_OnscreenPlayerInfo[0] = 3;
-    g_OffscreenPlayerInfo[0] = 3;
-    g_CoinTally = 0;
-    g_PlayerScore = 0;
-    Score_Reset();
-
-    OperMode_SetMode(TITLE_SCREEN_MODE);
-    g_GameEngineSubroutine = 0;
-    g_FrameCounter = 0;
+    initialize_game_state();
 
     if (options.tas_path) {
         if (fm2_open(&movie, options.tas_path, error, sizeof(error)) < 0) {

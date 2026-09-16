@@ -229,19 +229,11 @@ void DisplayTimeUp(void) {
  * Waits for the ScreenTimer interval timer to expire before advancing.
  * ======================================================================== */
 
-static void MoveAllSpritesOffscreen(void) {
-    extern uint8_t g_SpriteData[256];
-    int i;
-    for (i = 0; i < 256; i += 4) {
-        g_SpriteData[i] = 0xF8;
-    }
-}
-
 void ResetSpritesAndScreenTimer(void) {
     if (g_ScreenTimer != 0) {
         return; /* wait for timer to expire (NoReset) */
     }
-    MoveAllSpritesOffscreen();
+    Screen_MoveAllSpritesOffscreen();
     g_ScreenTimer = 7;
     Screen_IncTask();
 }

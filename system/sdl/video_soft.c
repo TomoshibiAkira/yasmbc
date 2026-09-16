@@ -45,9 +45,10 @@ static uint8_t bg_pattern_table = 1;
 static uint8_t video_ready;
 static uint8_t *color_dest;
 static uint8_t *opaque_dest;
-static uint32_t dirty_mask[VIDEO_HEIGHT];
+#ifdef DOS
 static uint32_t bg_serial = 1;
 static uint16_t world_cam;
+#endif
 #ifdef WIN95
 /* The native GDI indexed frontend has no texture upload stage: retain the
  * background in host memory
@@ -281,20 +282,6 @@ static void compose_cached_background(void)
 }
 #endif
 
-static void dirty_reset(void)
-{
-    memset(dirty_mask, 0, sizeof(dirty_mask));
-}
-
-#ifndef DOS
-static void mark_dirty_all(void)
-{
-    int y;
-    for (y = 0; y < VIDEO_HEIGHT; y++)
-        dirty_mask[y] = 0xFFFFFFFFu;
-}
-#endif
-
 int video_init(void)
 {
     int tile, row, col;
@@ -329,7 +316,6 @@ int video_init(void)
     set_draw_target(NULL, persistent_opaque);
     memset(persistent_opaque, 0, sizeof(persistent_opaque));
 #endif
-    dirty_reset();
     video_ready = 1;
     printf("Loaded %u bytes (%d tiles)\n",
            (unsigned)sizeof(chr_tiles), (int)(sizeof(chr_tiles) / TILE_SIZE));
@@ -344,21 +330,6 @@ void video_shutdown(void)
 const uint8_t *video_indices(void)
 {
     return frame_index_buffer;
-}
-
-const uint32_t *video_dirty_mask(void)
-{
-    return dirty_mask;
-}
-
-uint32_t video_bg_serial(void)
-{
-    return bg_serial;
-}
-
-uint16_t video_world_cam(void)
-{
-    return world_cam;
 }
 
 void platform_draw_tile_at(uint8_t tile, uint8_t palette, int screen_x, int screen_y)
@@ -667,7 +638,6 @@ void video_render_begin(void)
 {
     if (!video_ready)
         return;
-    dirty_reset();
 #ifdef DOS
     refresh_palette_luts();
     compose_persistent_bg();
@@ -684,7 +654,6 @@ void video_render_begin(void)
         PPU_RenderNametable(g_RenderNT);
     }
 #endif
-    mark_dirty_all();
 #endif
 }
 

@@ -6,9 +6,8 @@ through a host layer: software PPU-style rendering, and APU register writes
 fed to [Blargg's Nes_Snd_Emu](https://github.com/blarggs-audio-libraries/Nes_Snd_Emu).
 
 This tree is the playable program. It does not contain Nintendo ROM or CHR
-data. You can extract those from a dump you already own with provided
-tool script. The running binaries never open the original ROM; the dump is
-only an asset-extraction source, and this tree no longer builds a NES ROM.
+data. You can extract assets from a ROM dump you already own with provided
+tool script. The running binaries will never open the original ROM file.
 
 If you wish to dive into the code, [walkthrough.md](docs/walkthrough.md) is 
 a good starting point.

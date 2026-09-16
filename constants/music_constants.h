@@ -27,16 +27,12 @@
 /* Backward compatibility */
 #define Silence               MUSIC_SILENCE
 #define StarPowerMusic        MUSIC_STAR_POWER
-#define PipeIntroMusic        MUSIC_PIPE_INTRO
-#define CloudMusic            MUSIC_CLOUD
-#define CastleMusic           MUSIC_CASTLE
 #define UndergroundMusic       MUSIC_UNDERGROUND
 #define WaterMusic            MUSIC_WATER
 #define GroundMusic           MUSIC_GROUND
 
 #define TimeRunningOutMusic   MUSIC_TIME_RUNNING
 #define EndOfLevelMusic      MUSIC_END_LEVEL
-#define AltGameOverMusic      MUSIC_ALT_GAME_OVER
 #define EndOfCastleMusic      MUSIC_END_CASTLE
 #define VictoryMusic         MUSIC_VICTORY
 #define GameOverMusic        MUSIC_GAME_OVER

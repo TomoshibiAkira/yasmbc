@@ -64,3 +64,11 @@ void Screen_SetTask(uint8_t task) {
 uint8_t Screen_GetTask(void) {
     return g_ScreenRoutineTask;
 }
+
+void Screen_MoveAllSpritesOffscreen(void) {
+    extern uint8_t g_SpriteData[256];
+    int i;
+
+    for (i = 0; i < 256; i += 4)
+        g_SpriteData[i] = 0xF8;
+}

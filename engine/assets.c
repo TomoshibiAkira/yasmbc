@@ -252,42 +252,53 @@ static int try_pack(const char *path)
     return 0;
 }
 
+static int try_pack_names(void)
+{
+    static const char *const names[] = {"ASSETS.DAT", "assets.dat"};
+    size_t i;
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (try_pack(names[i]) == 0)
+            return 0;
+    }
+    return -1;
+}
+
+static int try_pack_beside(char *path, size_t path_size, const char *dir,
+                           int dos_separators)
+{
+    static const char *const names[] = {"ASSETS.DAT", "assets.dat"};
+    static const char separators[] = "/\\";
+    size_t separator_count = dos_separators ? 2 : 1;
+    size_t separator;
+    size_t name;
+
+    for (separator = 0; separator < separator_count; ++separator) {
+        for (name = 0; name < sizeof(names) / sizeof(names[0]); ++name) {
+            snprintf(path, path_size, "%s%c%s", dir, separators[separator],
+                     names[name]);
+            if (try_pack(path) == 0)
+                return 0;
+        }
+    }
+    return -1;
+}
+
 static int choose_root(void) {
     char dir[ASSETS_PATH_MAX];
     char beside[ASSETS_PATH_MAX * 2];
 
 #if defined(DOS) || defined(__DJGPP__)
-    if (try_pack("ASSETS.DAT") == 0 || try_pack("assets.dat") == 0)
+    if (try_pack_names() == 0)
         return 0;
-    if (s_argv0[0] && path_dirname(dir, sizeof(dir), s_argv0) == 0) {
-        snprintf(beside, sizeof(beside), "%s/ASSETS.DAT", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-        snprintf(beside, sizeof(beside), "%s/assets.dat", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-        snprintf(beside, sizeof(beside), "%s\\ASSETS.DAT", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-        snprintf(beside, sizeof(beside), "%s\\assets.dat", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-    }
+    if (s_argv0[0] && path_dirname(dir, sizeof(dir), s_argv0) == 0 &&
+        try_pack_beside(beside, sizeof(beside), dir, 1) == 0)
+        return 0;
 #if defined(__DJGPP__)
-    if (__dos_argv0 && __dos_argv0[0] && path_dirname(dir, sizeof(dir), __dos_argv0) == 0) {
-        snprintf(beside, sizeof(beside), "%s/ASSETS.DAT", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-        snprintf(beside, sizeof(beside), "%s/assets.dat", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-        snprintf(beside, sizeof(beside), "%s\\ASSETS.DAT", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-        snprintf(beside, sizeof(beside), "%s\\assets.dat", dir);
-        if (try_pack(beside) == 0)
-            return 0;
-    }
+    if (__dos_argv0 && __dos_argv0[0] &&
+        path_dirname(dir, sizeof(dir), __dos_argv0) == 0 &&
+        try_pack_beside(beside, sizeof(beside), dir, 1) == 0)
+        return 0;
 #endif
     fprintf(stderr, "Assets_Init: ASSETS.DAT not found next to SMB2.EXE\n");
     return -1;
@@ -322,16 +333,11 @@ static int choose_root(void) {
             }
         }
 #endif
-        if (try_pack("ASSETS.DAT") == 0 || try_pack("assets.dat") == 0)
+        if (try_pack_names() == 0)
             return 0;
-        if (s_argv0[0] && path_dirname(dir, sizeof(dir), s_argv0) == 0) {
-            snprintf(beside, sizeof(beside), "%s/ASSETS.DAT", dir);
-            if (try_pack(beside) == 0)
-                return 0;
-            snprintf(beside, sizeof(beside), "%s/assets.dat", dir);
-            if (try_pack(beside) == 0)
-                return 0;
-        }
+        if (s_argv0[0] && path_dirname(dir, sizeof(dir), s_argv0) == 0 &&
+            try_pack_beside(beside, sizeof(beside), dir, 0) == 0)
+            return 0;
         fprintf(stderr,
                 "Assets_Init: extracted assets not found. Run: make extract ROM=path.nes\n");
         return -1;

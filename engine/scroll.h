@@ -34,7 +34,6 @@ extern int16_t g_Background_X;
 
 void Scroll_Update(void);
 int Scroll_LoadRom(void);
-int Scroll_AreaParserWrote(void);
 int Scroll_AreaParserDue(void);
 void Scroll_RunParserTask(void);
 void Scroll_AreaParserSelectColumn(uint8_t index);
@@ -42,14 +41,6 @@ void Scroll_AreaParserRender(uint8_t right_half);
 void Scroll_AreaParserComplete(void);
 void Scroll_Reset(void);
 void Scroll_ApplyLoopback(void);
-void Scroll_LockHorizontal(uint8_t direction);
-void Scroll_UnlockHorizontal(void);
-void Scroll_LockVertical(void);
-void Scroll_UnlockVertical(void);
-uint16_t Scroll_GetWorldX(void);
-uint16_t Scroll_GetWorldY(void);
-void Scroll_SetPosition(uint8_t page, uint8_t x, uint8_t y);
-void Scroll_LevelEnd(void);
 void Scroll_Advance(uint8_t amount);
 
 #endif /* SMB_SCROLL_H */

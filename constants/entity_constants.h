@@ -68,7 +68,6 @@
 #define BowserFlame            ENTITY_BOWSER_FLAME
 #define Fireworks              ENTITY_FIREWORKS
 #define BBill_CCheep_Frenzy    ENTITY_BBILL_CCHEEP_F
-#define Stop_Frenzy            ENTITY_STOP_FRENZY
 #define Bowser                 ENTITY_BOWSER
 #define PowerUpObject          ENTITY_POWERUP
 #define VineObject             ENTITY_VINE
@@ -76,16 +75,8 @@
 #define StarFlagObject         ENTITY_STAR_FLAG
 #define JumpspringObject       ENTITY_JUMPSPRING
 #define BulletBill_CannonVar   ENTITY_BULLETBILL_CANNON
-#define WarpZoneEnemyObject    ENTITY_WARP_ZONE
 #define RetainerObject         ENTITY_RETAINER
-#define BalPlatform            ENTITY_BAL_PLATFORM
-#define VertPlatform            ENTITY_VERT_PLATFORM
 #define LargeLiftUp            ENTITY_LARGE_LIFT_UP
 #define LargeLiftDown          ENTITY_LARGE_LIFT_DOWN
-#define HoriPlatform            ENTITY_HORI_PLATFORM
-#define DropPlatform            ENTITY_DROP_PLATFORM
-#define LargeLiftUp2            ENTITY_LARGE_LIFT_UP_2
-#define SmallLiftUp             ENTITY_SMALL_LIFT_UP
-#define SmallLiftDown           ENTITY_SMALL_LIFT_DOWN
 
 #endif /* SMB_ENTITY_CONSTANTS_H */

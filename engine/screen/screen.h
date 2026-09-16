@@ -44,6 +44,7 @@ void Screen_IncTask(void);
 void Screen_ResetTask(void);
 void Screen_SetTask(uint8_t task);
 uint8_t Screen_GetTask(void);
+void Screen_MoveAllSpritesOffscreen(void);
 
 /* External global variables from opermode/globals */
 extern uint8_t g_ScreenRoutineTask;

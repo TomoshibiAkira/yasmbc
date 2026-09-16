@@ -25,11 +25,6 @@ void PPU_CopyRenderMemory(uint8_t *nametables, uint8_t *colors)
     memcpy(nametables, vram, sizeof(vram));
     memcpy(colors, palette, sizeof(palette));
 }
-/* FCEUX keeps the $3F04/$3F08/$3F0C color-zero writes in separate
- * readback latches.  The rendered palette slots remain the universal
- * background color written through $3F00 (the active SMB PPU path in
- * verifier/_deps/fceux/src/ppu.cpp:B2007). */
-static uint8_t palette_readback[3];
 static uint16_t scroll_x = 0;
 static uint32_t render_generation;
 static uint32_t nametable_generation;
@@ -79,7 +74,6 @@ void PPU_Init(void) {
     memset(&ppu, 0, sizeof(ppu));
     memset(vram, 0, sizeof(vram));
     memset(palette, 0, sizeof(palette));
-    memset(palette_readback, 0, sizeof(palette_readback));
     memset(tile_dirty, 0, sizeof(tile_dirty));
     memset(dirty_tiles, 0, sizeof(dirty_tiles));
     tiles_dirty_count = 0;
@@ -159,9 +153,7 @@ void PPU_WriteData(uint8_t value) {
                 palette[4] = value;
                 palette[8] = value;
                 palette[12] = value;
-            } else {
-                palette_readback[((pi & 0x0c) >> 2) - 1] = value;
-            }
+            } /* Other color-zero slots are readback-only on this model. */
         } else {
             if (palette[pi] != value) {
                 ++render_generation;
@@ -385,11 +377,6 @@ void PPU_ClearDirtyTiles(void)
         memset(tile_dirty, 0, sizeof(tile_dirty));
         tiles_dirty_count = 0;
     }
-}
-
-int PPU_DirtyTileCount(void)
-{
-    return tiles_dirty_count;
 }
 
 uint8_t PPU_TakePaletteDirty(void)

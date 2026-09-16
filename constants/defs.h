@@ -199,46 +199,12 @@
 #define WORLD_8  0x07
 
 /* Backward compatibility */
-#define World1 WORLD_1
-#define World2 WORLD_2
-#define World3 WORLD_3
-#define World4 WORLD_4
 #define World5 WORLD_5
-#define World6 WORLD_6
-#define World7 WORLD_7
 #define World8 WORLD_8
 
 /* ========================================================================
  * BACKWARD COMPATIBILITY ALIASES
  * ======================================================================== */
-
-/* Operating mode constants */
-#define TitleScreenModeValue TITLE_SCREEN_MODE
-#define GameModeValue        GAME_MODE
-#define VictoryModeValue    VICTORY_MODE
-#define GameOverModeValue    GAME_OVER_MODE
-
-/* Player state constants */
-#define PlayerState_Ground  PLAYER_STATE_GROUND
-#define PlayerState_Jump    PLAYER_STATE_JUMP
-#define PlayerState_Fall    PLAYER_STATE_FALL
-#define PlayerState_Climb   PLAYER_STATE_CLIMB
-
-/* Player status constants */
-#define PlayerStatus_Small   PLAYER_STATUS_SMALL
-#define PlayerStatus_Big     PLAYER_STATUS_BIG
-#define PlayerStatus_Fire    PLAYER_STATUS_FIRE
-
-/* Player size constants */
-#define PlayerSize_Small     PLAYER_SIZE_SMALL
-#define PlayerSize_Big       PLAYER_SIZE_BIG
-
-/* Area type constants */
-#define AreaType_Water       AREA_TYPE_WATER
-#define AreaType_Overworld   AREA_TYPE_OVERWORLD
-#define AreaType_Ground      AREA_TYPE_GROUND
-#define AreaType_Underground AREA_TYPE_UNDERGROUND
-#define AreaType_Castle      AREA_TYPE_CASTLE
 
 /* ========================================================================
  * CONTROLLER BUTTONS
@@ -254,13 +220,6 @@
 #define BTN_RIGHT  0x01
 
 /* Controller buttons (original asm names) */
-#define A_Button            BTN_A
-#define B_Button            BTN_B
-#define Select_Button       BTN_SELECT
-#define Start_Button        BTN_START
 #define Up_Dir              BTN_UP
-#define Down_Dir            BTN_DOWN
-#define Left_Dir            BTN_LEFT
-#define Right_Dir           BTN_RIGHT
 
 #endif /* SMB_DEFS_H */
